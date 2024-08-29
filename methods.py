@@ -1,12 +1,14 @@
 import random
-
 import gpytorch
 import torch
 import numpy as np
-from models import VanillaGP, ModelList, next_sample, device, model_lcb
+from models import VanillaGP, ModelList, next_sample, device, model_lcb, evaluation
 from problems import get_problem
-from utils import plot_hist, cvt, plot_tot, plot_box, plot_details
+from utils import plot_hist, cvt, plot_tot, plot_box, \
+    plot_details, plot_convergence, plot_iteration_convergence, \
+    debug_tot, debug_each, debug_hist
 import matplotlib.pyplot as plt
+from scipy.stats import qmc
 
 # method_name_list = ["ind_gp", "context_gp", "unified_gp",
 #                     "context_gp_plain", "unified_gp_plain",
@@ -15,16 +17,35 @@ import matplotlib.pyplot as plt
 #                     "forward_inverse_context_gp_inner_plain",
 #                     "forward_inverse_context_gp_plain"]
 
-method_name_list = ["ind_gp", "fixed_context_gp",
-                    "context_gp_plain", "forward_inverse_context_gp_plain"]
+# method_name_list = ["ind_gp", "fixed_context_gp",
+#                     "context_gp_plain", "forward_inverse_context_gp_plain"]
 
-problem_name = "sep_arm"
-direct_name = "result_physics"
+method_name_list = ["10_20_ind_gp_fixed",
+                    "10_20_fixed_context_gp",
+                    "10_20_fixed_context_gp_fixed"]
+                    # "10_1_fixed_context_gp"]
+                    # "10_50_fixed_context_gp_smooth_hetero"]
+                    # "10_50_fixed_context_inverse_cut_gp_hetero",
+                    # "10_50_fixed_context_gp_smooth_hetero"]
+
+# method_name_list = ["10_1_ind_gp", "10_1_fixed_context_gp", "10_1.0_forward_inverse_fixed_context_gp_plain"]
+
+# method_name_list = ["inverse_context_gp_plain",
+#                     "inverse_context_gp_inner_plain",
+#                     "forward_inverse_context_gp_inner_plain",
+#                     "context_gp"]
+
+problem_name = "linear_sphere"
+dim_size = 4
+direct_name = "{}_result_{}".format(problem_name, dim_size)
+task_number = 10
+beta_ucb = 50
+# direct_name = "result_physics"
 
 
 def configure_problem(problem_name):
     params = dict()
-    params["ind_size"] = 10
+    params["ind_size"] = task_number
     params["tot_init"] = 200
     params["tot_budget"] = 2000
     # params["tot_budget"] = 300
@@ -33,7 +54,7 @@ def configure_problem(problem_name):
     params["test_iter"] = 30
     params["problem_name"] = problem_name
     params["n_obj"] = 1
-    params["n_dim"] = 10
+    params["n_dim"] = dim_size
     params["n_task_params"] = 2
     return params
 
@@ -41,15 +62,20 @@ def configure_problem(problem_name):
 def configure_method(method_name):
     params = dict()
     params["if_ind"] = False
+    params["if_cut"] = False
     params["if_inverse"] = False
     params["if_forward"] = False
     params["if_unified"] = False
     params["if_cluster"] = True
     params["if_inner_cluster"] = False
     params["if_fixed"] = False
+    params["if_smooth"] = False
     params["method_name"] = method_name
 
     if method_name == "ind_gp":
+        params["if_ind"] = True
+
+    if method_name == "ind_gp_20":
         params["if_ind"] = True
 
     if method_name == "unified_gp":
@@ -59,6 +85,19 @@ def configure_method(method_name):
         params["if_cluster"] = False
 
     if method_name == "forward_inverse_context_gp_plain":
+        params["if_inner_cluster"] = True
+        params["if_forward"] = True
+        params["if_cluster"] = False
+        params["if_inverse"] = True
+
+    if method_name == "forward_inverse_fixed_context_gp_plain":
+        params["if_inner_cluster"] = True
+        params["if_forward"] = True
+        params["if_cluster"] = False
+        params["if_inverse"] = True
+        params["if_fixed"] = True
+
+    if method_name == "forward_inverse_context_gp_more_plain":
         params["if_inner_cluster"] = True
         params["if_forward"] = True
         params["if_cluster"] = False
@@ -82,7 +121,19 @@ def configure_method(method_name):
         params["if_unified"] = True
         params["if_cluster"] = False
 
+    if method_name == "fixed_context_gp_smooth":
+        params["if_fixed"] = True
+        params["if_smooth"] = True
+
     if method_name == "fixed_context_gp":
+        params["if_fixed"] = True
+
+    if method_name == "fixed_context_inverse_cut_gp":
+        params["if_fixed"] = True
+        params["if_inverse"] = True
+        params["if_cut"] = True
+
+    if method_name == "fixed_context_gp_20":
         params["if_fixed"] = True
 
     return params
@@ -94,6 +145,8 @@ def solver(problem_params, method_params, trial):
 
     # Fetch method parameters
     if_ind = method_params["if_ind"]
+    if_cut = method_params["if_cut"]
+    if_smooth = method_params["if_smooth"]
     if_inverse = method_params["if_inverse"]
     if_forward = method_params["if_forward"]
     if_unified = method_params["if_unified"]
@@ -126,15 +179,23 @@ def solver(problem_params, method_params, trial):
     bayesian_best_results = torch.Tensor([])
     if if_ind or if_fixed:
         if if_ind:
-            task_list = [torch.rand(n_task_params)
-                         for i in range(ind_size)]
+            task_list = fetch_task_lhs(n_task_params, ind_size)
+            # task_list = [torch.rand(n_task_params)
+            #              for i in range(ind_size)]
         if if_fixed:
-            task_list = fetch_task_list(trial)
+            task_list = fetch_task_lhs(n_task_params, ind_size)
+            # if method_name == "fixed_context_gp":
+            #     task_list = fetch_task_list(trial)
+            # elif method_name == "fixed_context_gp_20":
+            #     task_list = fetch_task_list(trial, method_name="ind_gp_20")
+            # else:
+            #     pass
 
         budget_per_task = tot_budget//ind_size
         bayesian_vector_list = [torch.zeros(budget_per_task, n_dim + n_task_params + n_obj)
                                 for i in range(ind_size)]
         bayesian_best_results = torch.ones(ind_size, n_dim + n_task_params + n_obj)
+        bayesian_cut_results = torch.Tensor([])
 
     # Prepare initialization
     if if_ind or if_fixed:
@@ -164,79 +225,371 @@ def solver(problem_params, method_params, trial):
         model_list = None
         sample_size = tot_init // ind_size
         tot_size = tot_budget // ind_size
+        cut_size = int(tot_size * 0.75)
 
-        for j in range(sample_size, tot_size):
-            model_list_prepare = []
-            likelihood_list_prepare = []
+        if not if_cut:
+            for j in range(sample_size, tot_size):
+                inverse_model_list = None
+                temp_vectors = None
+                model_list_prepare = []
+                likelihood_list_prepare = []
 
-            if if_ind:
-                for i in range(ind_size):
-                    # Build a forward GP model
+                if if_ind:
+                    for i in range(ind_size):
+                        # Build a forward GP model
+                        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+                        model = VanillaGP(bayesian_vector_list[i][:j, :n_dim],
+                                          bayesian_vector_list[i][:j,
+                                          (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
+                                          likelihood)
+                        # Insert it into a list
+                        model_list_prepare.append(model)
+                        likelihood_list_prepare.append(likelihood)
+
+                if if_fixed:
+                    temp_vectors = torch.Tensor([])
+                    for i in range(ind_size):
+                        # Stack all the records together
+                        temp_vectors = torch.cat([temp_vectors, bayesian_vector_list[i][:j, :]])
+                    # Build a unified GP model
                     likelihood = gpytorch.likelihoods.GaussianLikelihood()
-                    model = VanillaGP(bayesian_vector_list[i][:j, :n_dim],
-                                      bayesian_vector_list[i][:j,
-                                      (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
+                    model = VanillaGP(temp_vectors[:, :(n_dim + n_task_params)],
+                                      temp_vectors[:, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
                                       likelihood)
                     # Insert it into a list
                     model_list_prepare.append(model)
                     likelihood_list_prepare.append(likelihood)
 
-            if if_fixed:
-                temp_vectors = torch.Tensor([])
-                for i in range(ind_size):
-                    # Stack all the records together
-                    temp_vectors = torch.cat([temp_vectors, bayesian_vector_list[i][:j, :]])
-                # Build a unified GP model
-                likelihood = gpytorch.likelihoods.GaussianLikelihood()
-                model = VanillaGP(temp_vectors[:, :(n_dim + n_task_params)],
-                                  temp_vectors[:, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
-                                  likelihood)
-                # Insert it into a list
-                model_list_prepare.append(model)
-                likelihood_list_prepare.append(likelihood)
+                # Train the models
+                model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter)
+                model_list.train()
 
-            # Train the models
-            model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter)
-            model_list.train()
+                # Train the inverse models
+                if if_fixed and if_inverse:
+                    temp_bayesian_best_results = bayesian_best_results.clone()
 
-            for i in range(ind_size):
+                    # Build a unified inverse model from theta -> x
+                    inverse_model_list_prepare = []
+                    inverse_likelihood_list_prepare = []
+                    for d in range(n_dim):
+                        # For each inverse model, we have a dataset for each dimension (D totally)
+                        # We first build D separate models via model list
+                        # Then we combine them into a single ModelList class
+                        inverse_likelihood = gpytorch.likelihoods.GaussianLikelihood()
+                        inverse_model = VanillaGP(
+                            temp_bayesian_best_results[:, n_dim:(n_dim + n_task_params)],
+                            temp_bayesian_best_results[:, d],
+                            inverse_likelihood)
+
+                        inverse_likelihood_list_prepare.append(inverse_likelihood)
+                        inverse_model_list_prepare.append(inverse_model)
+
+                    # Train the models
+                    # We train each model collaboratively
+                    inverse_model_list = ModelList(inverse_model_list_prepare, inverse_likelihood_list_prepare, train_iter)
+                    inverse_model_list.train()
+                else:
+                    pass
+
+                # Forward-Inverse Sampling
+                if if_inverse and inverse_model_list:
+                    for i in range(ind_size):
+                        inverse_sample_size = 10000
+                        candidate_mean, candidate_std = inverse_model_list.test(task_list[i].unsqueeze(0))
+                        # print("j:{}, i:{}, candidate_mean:{}, candidate_std:{}".format(j,
+                        #                                                                i,
+                        #                                                                candidate_mean,
+                        #                                                                candidate_std))
+                        candidates = candidate_mean + torch.randn(inverse_sample_size, n_dim) * candidate_std
+                        candidates = torch.clamp(candidates, 0, 1).float()
+                        candidates = torch.cat([candidates,
+                                                task_list[i].unsqueeze(0).repeat(inverse_sample_size, 1)], dim=1)
+
+                        # select candidate
+                        candidates_lcb = model_lcb(model_list.model.models[0],
+                                                   model_list.likelihood.likelihoods[0],
+                                                   candidates,
+                                                   beta=beta_ucb)
+                        candidate_min = torch.argmin(candidates_lcb).item()
+                        ans = candidates[candidate_min, :n_dim]
+
+                        param = ans.unsqueeze(0)
+                        # attach the param and task_params
+                        bayesian_vector_list[i][j, :n_dim] = param.clone()
+                        bayesian_vector_list[i][j, n_dim:(n_dim + n_task_params)] = task_list[i]
+                        # Evaluate the solution
+                        bayesian_vector_list[i][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                            problem.evaluate(bayesian_vector_list[i][j, :(n_dim + n_task_params)])
+                        # Examine the best
+                        if bayesian_vector_list[i][j, -1] < bayesian_best_results[i, -1]:
+                            bayesian_best_results[i, :] = bayesian_vector_list[i][j, :]
+                            print("Task {} in Iteration {}: Best Obj {}".format(i+1, j+1, bayesian_vector_list[i][j, -1]))
+                else:
+                    # Sample the models
+                    if if_fixed:
+                        pass
+                        # print("DEBUG: noise term goes to: {}.".format(
+                        #     model_list.model.models[0].likelihood.noise.detach()
+                        # ))
+                        # print("DEBUG: Length scale goes to: {}.".format(
+                        #     model_list.model.models[0].covar_module.base_kernel.lengthscale.detach()
+                        # ))
+                    for i in range(ind_size):
+                        if if_ind:
+                            if_debug = False
+                            if i == task_number - 1 or i == task_number - 2:
+                                if_debug = False
+
+                            # print("DEBUG: noise term of task {} goes to {}".format(
+                            #     i+1,
+                            #     model_list.model.models[i].likelihood.noise.detach()
+                            # ))
+                            # print("DEBUG: Length scale of task {} goes to: {}.".format(
+                            #     i+1,
+                            #     model_list.model.models[i].covar_module.base_kernel.lengthscale.detach()
+                            # ))
+                            # Apply GP-UCB selection for each task
+                            ans = next_sample([model_list.model.models[i]],
+                                              [model_list.likelihood.likelihoods[i]],
+                                              n_dim,
+                                              torch.tensor([1], dtype=torch.float32).to(device),
+                                              mode=1,
+                                              fixed_solution=task_list[i],
+                                              beta=-beta_ucb,
+                                              opt_iter=test_iter,
+                                              if_debug=if_debug)
+                        if if_fixed:
+                            if_debug = False
+                            if i == task_number - 1 or i == task_number - 2:
+                                if_debug = False
+                            # Apply GP-UCB selection for each task
+                            ans = next_sample([model_list.model.models[0]],
+                                              [model_list.likelihood.likelihoods[0]],
+                                              n_dim,
+                                              torch.tensor([1], dtype=torch.float32).to(device),
+                                              mode=2,
+                                              fixed_solution=task_list[i],
+                                              beta=-beta_ucb,
+                                              opt_iter=test_iter,
+                                              if_debug=if_debug)
+
+                            # if j == tot_size - 1 and i == ind_size - 1:
+                            #     smooth_sample_size = 200
+                            #     filtered_sample_size = int(smooth_sample_size/2)
+                            #     sampler = qmc.LatinHypercube(n_task_params)
+                            #     smooth_samples = torch.from_numpy(sampler.random(smooth_sample_size)).float()
+                            #     smooth_best_results = torch.zeros(smooth_sample_size, n_dim + n_task_params + n_obj)
+                            #     smooth_mean_variance = torch.zeros(smooth_sample_size, 2)
+                            #     smooth_best_results[:, n_dim:(n_dim + n_task_params)] = smooth_samples
+                            #     for k in range(smooth_sample_size):
+                            #         ans = next_sample([model_list.model.models[0]],
+                            #                           [model_list.likelihood.likelihoods[0]],
+                            #                           n_dim,
+                            #                           torch.tensor([1], dtype=torch.float32).to(device),
+                            #                           mode=2,
+                            #                           fixed_solution=smooth_samples[k, :],
+                            #                           beta=-beta_ucb,
+                            #                           opt_iter=test_iter*2,
+                            #                           if_debug=if_debug)
+                            #         smooth_best_results[k, :n_dim] = ans
+                            #         current_result = smooth_best_results[k, :(n_dim+n_task_params)]
+                            #         temp_mean, temp_variance = evaluation(model_list.model.models[0],
+                            #                                               model_list.likelihood.likelihoods[0],
+                            #                                               current_result.unsqueeze(0),
+                            #                                               False)
+                            #         smooth_mean_variance[k, 0] = temp_mean
+                            #         smooth_mean_variance[k, 1] = temp_variance
+                            #
+                            #     # sorting
+                            #     _, arg_ind = torch.sort(smooth_mean_variance, dim=0)
+                            #     filtered_smooth_best_results = smooth_best_results[arg_ind[:, -1]][:filtered_sample_size,:]
+                            #     # filtered_smooth_samples = smooth_samples[arg_ind[:, -1]][:filtered_sample_size,:]
+                            #     bayesian_best_results = torch.cat([bayesian_best_results, filtered_smooth_best_results])
+                            #     # # plot mean
+                            #     # plot_details(filtered_smooth_samples, smooth_mean_variance[:, 0], "mean", True)
+                            #     # plot_details(filtered_smooth_samples, smooth_mean_variance[:, 1], "variance", True)
+                            #     # plt.show()
+                            #     # plot variance
+
+                        # ans should be in size of [n_dim, ]
+                        param = ans.unsqueeze(0)
+                        # attach the param and task_params
+                        bayesian_vector_list[i][j, :n_dim] = param.clone()
+                        bayesian_vector_list[i][j, n_dim:(n_dim + n_task_params)] = task_list[i]
+                        # Evaluate the solution
+                        bayesian_vector_list[i][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                            problem.evaluate(bayesian_vector_list[i][j, :(n_dim + n_task_params)])
+
+                        if bayesian_vector_list[i][j, -1] < bayesian_best_results[i, -1]:
+                            # if i == task_number - 1 or i == task_number - 2:
+                            if i < 100:
+                                bayesian_best_results[i, :] = bayesian_vector_list[i][j, :]
+                                print("Task {} in Iteration {}: Best Obj {}".format(i+1, j+1, bayesian_vector_list[i][j, -1]))
+                                print("Task {} in Iteration {}: Best Sol {}".format(i+1, j+1, bayesian_vector_list[i][j, :n_dim]))
+                        # DEBUG:
+                        # cur_obj = bayesian_vector_list[i][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)]
+                        # print("Iteration {}: Task #{} with fitness value {}.".format(j+1,
+                        #                                                              i+1,
+                        #                                                              cur_obj))
+        else:
+            for j in range(sample_size, cut_size):
+                model_list_prepare = []
+                likelihood_list_prepare = []
                 if if_ind:
-                    # Apply GP-UCB selection for each task
-                    ans = next_sample([model_list.model.models[i]],
-                                      [model_list.likelihood.likelihoods[i]],
-                                      n_dim,
-                                      torch.tensor([1], dtype=torch.float32).to(device),
-                                      mode=1,
-                                      fixed_solution=task_list[i],
-                                      opt_iter=test_iter,
-                                      if_debug=False)
+                    for i in range(ind_size):
+                        # Build a forward GP model
+                        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+                        model = VanillaGP(bayesian_vector_list[i][:j, :n_dim],
+                                          bayesian_vector_list[i][:j,
+                                          (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
+                                          likelihood)
+                        # Insert it into a list
+                        model_list_prepare.append(model)
+                        likelihood_list_prepare.append(likelihood)
+
                 if if_fixed:
+                    temp_vectors = torch.Tensor([])
+                    for i in range(ind_size):
+                        # Stack all the records together
+                        temp_vectors = torch.cat([temp_vectors, bayesian_vector_list[i][:j, :]])
+                    # Build a unified GP model
+                    likelihood = gpytorch.likelihoods.GaussianLikelihood()
+                    model = VanillaGP(temp_vectors[:, :(n_dim + n_task_params)],
+                                      temp_vectors[:, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(
+                                          1),
+                                      likelihood)
+                    # Insert it into a list
+                    model_list_prepare.append(model)
+                    likelihood_list_prepare.append(likelihood)
+
+                # Train the models
+                model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter)
+                model_list.train()
+
+                # Sample the models
+                for i in range(ind_size):
+                    if if_ind:
+                        # Apply GP-UCB selection for each task
+                        ans = next_sample([model_list.model.models[i]],
+                                          [model_list.likelihood.likelihoods[i]],
+                                          n_dim,
+                                          torch.tensor([1], dtype=torch.float32).to(device),
+                                          mode=1,
+                                          fixed_solution=task_list[i],
+                                          beta=-beta_ucb,
+                                          opt_iter=test_iter,
+                                          if_debug=False)
+                    if if_fixed:
+                        # Apply GP-UCB selection for each task
+                        ans = next_sample([model_list.model.models[0]],
+                                          [model_list.likelihood.likelihoods[0]],
+                                          n_dim,
+                                          torch.tensor([1], dtype=torch.float32).to(device),
+                                          mode=2,
+                                          fixed_solution=task_list[i],
+                                          beta=-beta_ucb,
+                                          opt_iter=test_iter,
+                                          if_debug=False)
+                    # ans should be in size of [n_dim, ]
+                    param = ans.unsqueeze(0)
+                    # attach the param and task_params
+                    bayesian_vector_list[i][j, :n_dim] = param.clone()
+                    bayesian_vector_list[i][j, n_dim:(n_dim + n_task_params)] = task_list[i]
+                    # Evaluate the solution
+                    bayesian_vector_list[i][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                        problem.evaluate(bayesian_vector_list[i][j, :(n_dim + n_task_params)])
+
+                    if bayesian_vector_list[i][j, -1] < bayesian_best_results[i, -1]:
+                        bayesian_best_results[i, :] = bayesian_vector_list[i][j, :]
+                        print("Task {} in Iteration {}: Best Obj {}".format(i + 1, j + 1,
+                                                                            bayesian_vector_list[i][j, -1]))
+                        print("Task {} in Iteration {}: Best Sol {}".format(i + 1, j + 1,
+                                                                            bayesian_vector_list[i][j, :n_dim]))
+
+            for j in range(cut_size, tot_size):
+                inverse_model_list = None
+                model_list_prepare = []
+                likelihood_list_prepare = []
+                temp_vectors = torch.Tensor([])
+                # Train the forward model
+                if if_fixed:
+                    for i in range(ind_size):
+                        # Stack all the records together
+                        temp_vectors = torch.cat([temp_vectors, bayesian_vector_list[i][:cut_size, :]])
+                    if j > cut_size:
+                        temp_vectors = torch.cat([temp_vectors, bayesian_cut_results])
+                    # Build a unified GP model
+                    likelihood = gpytorch.likelihoods.GaussianLikelihood()
+                    model = VanillaGP(temp_vectors[:, :(n_dim + n_task_params)],
+                                      temp_vectors[:, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(
+                                          1),
+                                      likelihood)
+                    # Insert it into a list
+                    model_list_prepare.append(model)
+                    likelihood_list_prepare.append(likelihood)
+
+                    # Train the models
+                    model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter)
+                    model_list.train()
+                # Train the inverse model
+                if if_inverse:
+                    temp_bayesian_best_results = temp_vectors.clone()
+
+                    # Build a unified inverse model from theta -> x
+                    inverse_model_list_prepare = []
+                    inverse_likelihood_list_prepare = []
+                    for d in range(n_dim):
+                        # For each inverse model, we have a dataset for each dimension (D totally)
+                        # We first build D separate models via model list
+                        # Then we combine them into a single ModelList class
+                        inverse_likelihood = gpytorch.likelihoods.GaussianLikelihood()
+                        inverse_model = VanillaGP(
+                            temp_bayesian_best_results[:, n_dim:(n_dim + n_task_params)],
+                            temp_bayesian_best_results[:, d],
+                            inverse_likelihood)
+
+                        inverse_likelihood_list_prepare.append(inverse_likelihood)
+                        inverse_model_list_prepare.append(inverse_model)
+
+                    # Train the models
+                    # We train each model collaboratively
+                    inverse_model_list = ModelList(inverse_model_list_prepare, inverse_likelihood_list_prepare,
+                                                   train_iter)
+                    inverse_model_list.train()
+                # Sample tasks
+                candidate_size = 10000
+                candidate_tasks = torch.rand(candidate_size, n_task_params)
+                candidate_mean, candidate_std = inverse_model_list.test(candidate_tasks)
+                candidate_std_sum = torch.sum(candidate_std, dim=1)
+                candidate_sort, candidate_ind = torch.sort(candidate_std_sum, descending=True)
+                candidate_finals = candidate_tasks[candidate_ind, :][:ind_size, :]
+                # Optimize the tasks
+                candidate_sols = torch.zeros(ind_size, n_dim + n_task_params + n_obj)
+                for i in range(ind_size):
                     # Apply GP-UCB selection for each task
                     ans = next_sample([model_list.model.models[0]],
                                       [model_list.likelihood.likelihoods[0]],
                                       n_dim,
                                       torch.tensor([1], dtype=torch.float32).to(device),
                                       mode=2,
-                                      fixed_solution=task_list[i],
+                                      fixed_solution=candidate_finals[i],
                                       opt_iter=test_iter,
                                       if_debug=False)
-                # ans should be in size of [n_dim, ]
-                param = ans.unsqueeze(0)
-                # attach the param and task_params
-                bayesian_vector_list[i][j, :n_dim] = param.clone()
-                bayesian_vector_list[i][j, n_dim:(n_dim + n_task_params)] = task_list[i]
-                # Evaluate the solution
-                bayesian_vector_list[i][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
-                    problem.evaluate(bayesian_vector_list[i][j, :(n_dim + n_task_params)])
 
-                if bayesian_vector_list[i][j, -1] < bayesian_best_results[i, -1]:
-                    bayesian_best_results[i, :] = bayesian_vector_list[i][j, :]
-                    print("Task {} in Iteration {}: Best Obj {}".format(i+1, j+1, bayesian_vector_list[i][j, -1]))
-                # DEBUG:
-                # cur_obj = bayesian_vector_list[i][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)]
-                # print("Iteration {}: Task #{} with fitness value {}.".format(j+1,
-                #                                                              i+1,
-                #                                                              cur_obj))
+                    param = ans.unsqueeze(0)
+                    # attach the param and task_params
+                    candidate_sols[i, :n_dim] = param.clone()
+                    candidate_sols[i, n_dim:(n_dim + n_task_params)] = candidate_finals[i]
+                    # Evaluate the solution
+                    candidate_sols[i, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                        problem.evaluate(candidate_sols[i, :(n_dim + n_task_params)])
+                # move the candidate sols to the tot
+                bayesian_cut_results = torch.cat([bayesian_cut_results, candidate_sols])
+
+                if j == tot_size - 1:
+                    # move the cut_results to best results
+                    bayesian_best_results = torch.cat([bayesian_best_results, bayesian_cut_results])
+
     else:
         model_list = None
         inverse_model_list = None
@@ -333,7 +686,8 @@ def solver(problem_params, method_params, trial):
                 # Apply GP-UCB selection for each task
                 if if_forward and inverse_model_list:
                     # if_forward always coupled with inverse model
-                    inverse_sample_size = 500
+                    # inverse_sample_size = 500
+                    inverse_sample_size = 10000
                     candidate_mean, candidate_std = inverse_model_list.test(task_list[i, :].unsqueeze(0))
                     candidates = candidate_mean + torch.randn(inverse_sample_size, n_dim) * candidate_std
                     candidates = torch.clamp(candidates, 0, 1).float()
@@ -435,6 +789,7 @@ def solver(problem_params, method_params, trial):
         model_list = None
         model_list_prepare = []
         likelihood_list_prepare = []
+
         for d in range(n_dim):
             # For each inverse model, we have a dataset for each dimension (D totally)
             # We first build D separate models via model list
@@ -459,7 +814,11 @@ def solver(problem_params, method_params, trial):
         # Save the likelihood state_dict
         model_records["likelihood_tasks"] = model_list.likelihood.state_dict()
 
-        torch.save(model_records, "./{}/{}_{}_{}.pth".format(direct_name, problem_name, method_name, trial+3))
+        torch.save(model_records, "./{}/{}_{}_{}_ard_{}.pth".format(direct_name,
+                                                                task_number,
+                                                                beta_ucb,
+                                                                method_name,
+                                                                trial))
     else:
         model_records = dict()
         model_records["ind"] = False
@@ -525,13 +884,13 @@ def solver(problem_params, method_params, trial):
         # Save the likelihood state_dict
         model_records["likelihood_tasks"] = model_list.likelihood.state_dict()
 
-        torch.save(model_records, "./{}/{}_{}_{}.pth".format(direct_name, problem_name, method_name, trial+3))
+        torch.save(model_records, "./{}/{}_{}_{}.pth".format(direct_name, problem_name, method_name, trial))
 
     return None
 
 
 def main_solver(trials, method_name="unified_gp"):
-    problem_params = configure_problem("sep_arm")
+    problem_params = configure_problem(problem_name)
     method_params = configure_method(method_name)
     for trial in range(trials):
         solver(problem_params, method_params, trial)
@@ -542,12 +901,12 @@ def main_retrival(method_name="ind_gp", problem_name="sep_arm", trial_number=0):
     # problem_name = "sep_arm"
     # trial_number = 0
 
-    if method_name == "ind_gp" or "fixed_context_gp":
-        results = torch.load("./{}/{}_{}_{}.pth".format(direct_name, problem_name, method_name, trial_number))
+    if True or method_name == "ind_gp" or "ind_gp_20" or "fixed_context_gp" or "fixed_context_gp_20":
+        results = torch.load("./{}/{}_{}.pth".format(direct_name, method_name, trial_number))
         n_dim = results["dim"]
         n_task_param = len(results["tasks"][0])
         n_tasks = len(results["tasks"])
-        problem = get_problem(problem_name, n_task_param)
+        problem = get_problem(problem_name, n_dim)
         result_model_list = []
 
         result_model_list_prepare = []
@@ -586,7 +945,7 @@ def main_retrival(method_name="ind_gp", problem_name="sep_arm", trial_number=0):
         n_dim = results["dim"]
         n_task_param = results["tasks"].shape[1]
         n_tasks = results["tasks"].shape[0]
-        problem = get_problem(problem_name, n_task_param)
+        problem = get_problem(problem_name, n_dim)
         result_model_list = []
 
         result_model_list_prepare = []
@@ -630,12 +989,12 @@ def testing(tasks, result_model_list, problem):
     for tr in range(trial):
         tasks_ans[tr] = problem.evaluate(tasks_sol[tr, :])
 
-    return tasks_ans
+    return tasks_ans, tasks_sol
 
 
 def uniform_sample(sample_width=100):
-    x = np.linspace(0.05, 1, sample_width)
-    y = np.linspace(0.05, 1, sample_width)
+    x = np.linspace(0.05, 0.95, sample_width)
+    y = np.linspace(0.05, 0.95, sample_width)
     xx, yy = np.meshgrid(x, y)
     points = np.vstack([xx.ravel(), yy.ravel()]).T
     samples = torch.from_numpy(points).float()
@@ -646,6 +1005,7 @@ def uniform_sample(sample_width=100):
 def compare_all():
     models_tot = dict()
     results_tot = dict()
+    sols_tot = dict()
 
     # test_data
     # test_tot = 10000
@@ -655,39 +1015,115 @@ def compare_all():
     test_data = uniform_sample(sample_width)
 
     # method_name = "context_gp"
-    problem_name = "sep_arm"
+    problem_name = problem_name
     trial_number_tot = 10
 
     # problem
-    problem = get_problem(problem_name, 2)
+    problem = get_problem(problem_name, dim_size)
 
     model_dict = dict()
     result_lists = []
+    std_lists = []
+    sol_lists = []
     # Store the models for each method
     for m_id, method_name in enumerate(method_name_list):
         model_lists = []
         results_lists = torch.zeros(trial_number_tot, test_tot)
+        # stds_lists = torch.zeros(trial_number_tot, test_tot)
+        sols_lists = torch.zeros(trial_number_tot, test_tot, 4+2)
         for trial_number in range(trial_number_tot):
             temp_model = main_retrival(method_name=method_name,
                                        problem_name=problem_name,
                                        trial_number=trial_number)
             model_lists.append(temp_model)
-            temp_result = testing(test_data, temp_model, problem)
+            temp_result, temp_sol = testing(test_data, temp_model, problem)
             results_lists[trial_number, :] = temp_result
+            sols_lists[trial_number, :, :] = temp_sol
 
         models_tot[method_name] = model_lists
         results_tot[method_name] = results_lists
+        sols_tot[method_name] = sols_lists
         result_lists.append(torch.mean(results_lists, dim=0).numpy())
+        std_lists.append(torch.std(results_lists, dim=0).numpy())
+        sol_lists.append(sols_lists)
 
         # plot_details(test_data.numpy(), torch.mean(results_lists, dim=0).numpy(), method_name)
+        plot_tot(results_lists, m_id + 1, ["Strategy 1", "Strategy 2", "Strategy 3"])
+    # plot_box(result_lists, ["Strategy 1", "Strategy 2", "Strategy 3"])
+    plt.show()
+    while True:
+        x_ind = int(input())
+        print("test_data is {}.".format(test_data[x_ind, :]))
+        for ind_ind in range(len(result_lists)):
+            print("Result {}: {} / {}.".format(ind_ind + 1,
+                                               result_lists[ind_ind][x_ind],
+                                               std_lists[ind_ind][x_ind]
+                                               ))
+        debug_each(sol_lists, ["Strategy 1", "Strategy 2", "Strategy 3"], x_ind)
+        plt.show()
+
+
+def compare_convergence():
+    models_tot = dict()
+    results_tot = dict()
+    model_dict = dict()
+
+    # method_name = "context_gp"
+    problem_name = "sep_arm"
+    trial_number_tot = 9
+
+    result_lists = []
+    convergence_lists = []
+    plot_lists = []
+    for t_id in range(task_number):
+        empty_list = []
+        empty_list_plot = []
+        for m_id in range(len(method_name_list)):
+            empty_list.append(torch.Tensor([]))
+            empty_list_plot.append(torch.Tensor([]))
+        convergence_lists.append(empty_list)
+        plot_lists.append(empty_list_plot)
+
+    # Store the results for each method
+    for m_id, method_name in enumerate(method_name_list):
+        method_results = torch.zeros(task_number, trial_number_tot)
+        for trial_number in range(trial_number_tot):
+            results = torch.load("./{}/{}_{}.pth".format(direct_name, method_name, trial_number))
+            temp_results = results["record_tasks"][:task_number, -1]
+            print(temp_results.shape)
+            method_results[:, trial_number] = temp_results
+
+            for t_id in range(task_number):
+                temp_convergence, _ = torch.cummin(torch.log(results["record_{}".format(t_id+1)][:, -1]+1), dim=0)
+                temp_tot = results["record_{}".format(t_id+1)]
+                convergence_lists[t_id][m_id] = \
+                    torch.cat([convergence_lists[t_id][m_id], temp_convergence.unsqueeze(1)], dim=1)
+                plot_lists[t_id][m_id] = \
+                    torch.cat([plot_lists[t_id][m_id], temp_tot], dim=0)
+
+        result_lists.append(method_results)
+        # plot_details(test_data.numpy(), torch.mean(results_lists, dim=0).numpy(), method_name)
         # plot_tot(results_lists, m_id + 1, method_name)
-    plot_box(result_lists, ["Strategy 1", "Strategy 2", "Random", "Forward-Inverse"])
+    # plot_box(result_lists, method_name_list)
+    for t_id in range(task_number):
+        plot_iteration_convergence(convergence_lists[t_id], method_name_list, t_id)
+
+    # for t_id in range(task_number):
+    #     # debug_tot(plot_lists[t_id], method_name_list, 200, 400, 4)
+    #     debug_hist(plot_lists[t_id], method_name_list, 0, 200, -1)
+
+    plot_convergence(result_lists, method_name_list)
     plt.show()
 
 
 def fetch_task_list(trial_number, problem_name="sep_arm", method_name="ind_gp"):
     results = torch.load("./{}/{}_{}_{}.pth".format(direct_name, problem_name, method_name, trial_number))
     return results["tasks"]
+
+
+def fetch_task_lhs(task_param=2, task_size=10):
+    results = torch.load("./task_list_{}_{}.pth".format(task_size, task_param))
+    return results
 
 
 # method_name_list = ["ind_gp", "context_gp", "unified_gp",
@@ -699,7 +1135,11 @@ def fetch_task_list(trial_number, problem_name="sep_arm", method_name="ind_gp"):
 
 
 if __name__ == "__main__":
-    main_solver(trials=7, method_name="fixed_context_gp")
+    # main_solver(trials=10, method_name="ind_gp")
+    main_solver(trials=10, method_name="fixed_context_gp")
+    # main_solver(trials=10, method_name="fixed_context_gp_smooth")
+    # main_solver(trials=10, method_name="fixed_context_inverse_cut_gp")
+    # main_solver(trials=10, method_name="forward_inverse_fixed_context_gp_plain")
     # trial_num = 1
     # # tasks_1 = fetch_task_list(trial_num, method_name="unified_gp")
     # tasks_2 = fetch_task_list(trial_num, method_name="unified_gp_plain")
@@ -727,4 +1167,5 @@ if __name__ == "__main__":
     # plt.legend()
     # plt.show()
     # compare_all()
+    # compare_convergence()
 

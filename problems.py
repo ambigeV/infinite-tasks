@@ -5,11 +5,45 @@ import torch
 import time
 
 
+def get_linear_mat(k):
+    mat_placeholder = np.zeros((2, k))
+    assert k > 1
+    mat_placeholder[1, :] = np.arange(0, k) / (k - 1)
+    mat_placeholder[0, :] = np.arange(k - 1, -1, -1) / (k - 1)
+    return mat_placeholder.T
+
+
+def get_constant_mat(k):
+    mat_placeholder = np.zeros((2, k))
+    assert k > 1
+    mid_val = k // 2
+    mat_placeholder[1, mid_val:] = 1
+    mat_placeholder[0, :mid_val] = 1
+    return mat_placeholder.T
+
+
 def get_problem(name, problem_params=None):
     name = name.lower()
+    # key: 'perfect_sphere'
+    # key: 'linear_sphere'
+    # key: 'nonlinear_sphere'
+
+    # key: 'perfect_ackley'
+    # key: 'linear_ackley'
+    # key: 'nonlinear_ackley'
+
+    # key: 'perfect_rastrigin'
+    # key: 'linear_rastrigin'
+    # key: 'nonlinear_rastrigin'
 
     PROBLEM = {
         'sep_arm': ActualArm(n_dim=problem_params),
+        'perfect_sphere': Sphere(n_dim=problem_params, mode="perfect"),
+        'linear_sphere': Sphere(n_dim=problem_params, mode="linear"),
+        'perfect_ackley': Ackley(n_dim=problem_params, mode="perfect"),
+        'linear_ackley': Ackley(n_dim=problem_params, mode="linear"),
+        'perfect_rastrigin': Rastrigin(n_dim=problem_params, mode="perfect"),
+        'linear_rastrigin': Rastrigin(n_dim=problem_params, mode="linear"),
     }
 
     if name not in PROBLEM:
@@ -42,6 +76,83 @@ class Arm:
             v = mat * np.matrix([0, 0, 0, 1]).transpose()
             self.joint_xy += [v[0:2].A.flatten()]
         return self.joint_xy[self.n_dofs], self.joint_xy
+
+
+class Sphere:
+    def __init__(self, n_dim=10, mode="perfect", factor=4):
+        self.n_dim = n_dim
+        self.n_obj = 1
+        self.mode = mode
+        shift_mat = None
+        if self.mode == "perfect":
+            shift_mat = get_constant_mat(self.n_dim)
+        elif self.mode == "linear":
+            shift_mat = get_linear_mat(self.n_dim)
+        else:
+            pass
+        self.shift_mat = shift_mat
+        self.factor = factor
+
+    def evaluate(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        return np.sum(np.power(sol * self.factor - shift * self.factor, 2))
+
+
+class Ackley:
+    def __init__(self, n_dim=10, mode="perfect", factor=4):
+        self.n_dim = n_dim
+        self.n_obj = 1
+        self.mode = mode
+        shift_mat = None
+        if self.mode == "perfect":
+            shift_mat = get_constant_mat(self.n_dim)
+        elif self.mode == "linear":
+            shift_mat = get_linear_mat(self.n_dim)
+        else:
+            pass
+        self.shift_mat = shift_mat
+        self.factor = factor
+
+    def evaluate(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        return -20 * np.exp(-0.2 * np.sqrt(np.mean(np.power(sol * self.factor - shift * self.factor, 2)))) - \
+            np.exp(np.mean(np.cos(2 * np.pi * self.factor * (sol - shift)))) + 20 + np.exp(1)
+
+
+class Rastrigin:
+    def __init__(self, n_dim=10, mode="perfect", factor=4):
+        self.n_dim = n_dim
+        self.n_obj = 1
+        self.mode = mode
+        shift_mat = None
+        if self.mode == "perfect":
+            shift_mat = get_constant_mat(self.n_dim)
+        elif self.mode == "linear":
+            shift_mat = get_linear_mat(self.n_dim)
+        else:
+            pass
+        self.shift_mat = shift_mat
+        self.factor = factor
+
+    def evaluate(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        return np.sum(np.power((sol - shift) * self.factor, 2) -
+                      10 * np.cos(2 * np.pi * self.factor * (sol - shift)) + 10)
 
 
 class ActualArm:

@@ -2,6 +2,7 @@ import gpytorch
 from gpytorch.mlls import SumMarginalLogLikelihood
 import torch
 import torch.distributions as dist
+from utils import plot_grad
 
 device = torch.device("cpu")
 
@@ -9,7 +10,9 @@ device = torch.device("cpu")
 class VanillaGP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
         super().__init__(train_x, train_y, likelihood)
+        self.no_of_data, self.no_of_dim = train_x.shape
         self.mean_module = gpytorch.means.ConstantMean()
+        # self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=self.no_of_dim))
         self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
 
     def forward(self, x):
@@ -79,9 +82,9 @@ def lower_confidence_bound(mean_tensor, std_tensor, beta=0.5):
     return mean_tensor - beta * std_tensor
 
 
-def model_lcb(model, likelihood, test_x):
+def model_lcb(model, likelihood, test_x, beta=0.5):
     means, std = evaluation(model, likelihood, test_x, if_grad=False)
-    lcb = lower_confidence_bound(means, std)
+    lcb = lower_confidence_bound(means, std, beta=beta)
     return lcb
 
 
@@ -119,6 +122,9 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
     # Initiate a set of starting points in size (num_start)
     obj_size = len(model_list)
 
+    if if_debug:
+        grad_list = torch.Tensor([])
+
     if if_cuda:
         solutions = torch.rand(num_restart, sol_dim).to(device)
     else:
@@ -135,12 +141,22 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
         for i in range(len(model_list)):
             if mode == 1:
                 mean_values, std_values = evaluation(model_list[i], likelihood_list[i], solutions)
+                if if_debug:
+                    print("mean_values: {}, std:values {}".format(mean_values.detach(),
+                                                                  std_values.detach()))
+
             elif mode == 2:
                 # fixed_solution.requires_grad = True
                 mean_values, std_values = \
                     evaluation(model_list[i],
                                likelihood_list[i],
                                torch.cat([solutions, fixed_solution.unsqueeze(0).repeat(num_restart, 1)], dim=1))
+                if if_debug:
+                    print("mean_values: {}, std:values {}".format(mean_values.detach(),
+                                                                  std_values.detach()))
+
+
+
             elif mode == 3:
                 # fixed_solution.requires_grad = True
                 mean_values, std_values = \
@@ -154,6 +170,7 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
 
         means = torch.cat(means_list, dim=1)
         stds = torch.cat(stds_list, dim=1)
+
 
         # ucb is in size of [num_restart, obj_size]
         if aq_func == "UCB":
@@ -174,9 +191,13 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
             ans = solutions[ind, :][0].detach()
 
             if if_debug:
-                print("Loss in iter {} is {} from answer {}.".format(k,
-                                                                     torch.min(outputs.detach()).item(),
-                                                                     ans))
+                # print("Loss in iter {} is {} from answer {}.".format(k,
+                #                                                      torch.min(outputs.detach()).item(),
+                #                                                      ans))
+                # print("Gradient in iter {} is {}.".format(
+                #     k, torch.mean(torch.abs(solutions.grad), dim=1)
+                # ))
+                grad_list = torch.cat([grad_list, torch.mean(torch.abs(solutions.grad), dim=1).unsqueeze(0)], dim=0)
 
             # Bound the tensor in between 0 and 1
             with torch.no_grad():
@@ -186,6 +207,8 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
         else:
             sorted_outputs, ind = torch.sort(outputs)
             ans = solutions[ind, :][0].detach()
+            # if if_debug:
+            #     print("Best ans: {}, Best output: {}".format(ans.detach(), sorted_outputs.detach()))
             # print(outputs.detach())
             # print(solutions.detach())
             return ans
