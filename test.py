@@ -28,17 +28,18 @@ if __name__ == "__main__":
     # plt.plot(results[:, 0], results[:, 1], 'bo', alpha=0.1)
     # plt.plot(centers[:, 0], centers[:, 1], 'rx', alpha=1)
     # plt.show()
-    # ind_size = 10
-    # dim_size = 2
-    # name = "task_list_{}_{}.pth".format(ind_size, dim_size)
-    # # sampler = qmc.LatinHypercube(dim_size)
-    # # samples = sampler.random(ind_size)
-    # # ind_size_list = []
+    ind_size = 20
+    dim_size = 5
+    name = "task_list_{}_{}.pth".format(ind_size, dim_size)
+    sampler = qmc.LatinHypercube(dim_size)
+    samples = sampler.random(ind_size)
+
+    ind_size_list = []
     # ind_size_list = torch.load(name)
     # samples = torch.stack(ind_size_list).numpy()
-    # # for i in samples:
-    # #     ind_size_list.append(torch.from_numpy(i).float())
-    # # torch.save(ind_size_list, name)
+    for i in samples:
+        ind_size_list.append(torch.from_numpy(i).float())
+    torch.save(ind_size_list, name)
     # print(samples.__class__)
     # print(samples.shape)
     # plt.scatter(samples[:, 0], samples[:, 1])
@@ -50,18 +51,18 @@ if __name__ == "__main__":
     #                                              0))
     # print("DEBUG")
     # print("ENDING... ...")
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    import matplotlib.cm as cm
-
-    delta = 0.025
-    x = np.arange(-3.0, 3.0, delta)
-    y = np.arange(-2.0, 2.0, delta)
-    X, Y = np.meshgrid(x, y)
-    Z1 = np.exp(-X ** 2 - Y ** 2)
-    Z2 = np.exp(-(X - 1) ** 2 - (Y - 1) ** 2)
-    Z = (Z1 - Z2) * 2
-    print(X.shape)
-    print(Y.shape)
-    print(Z.shape)
+    # import matplotlib.pyplot as plt
+    # import numpy as np
+    #
+    # import matplotlib.cm as cm
+    #
+    # delta = 0.025
+    # x = np.arange(-3.0, 3.0, delta)
+    # y = np.arange(-2.0, 2.0, delta)
+    # X, Y = np.meshgrid(x, y)
+    # Z1 = np.exp(-X ** 2 - Y ** 2)
+    # Z2 = np.exp(-(X - 1) ** 2 - (Y - 1) ** 2)
+    # Z = (Z1 - Z2) * 2
+    # print(X.shape)
+    # print(Y.shape)
+    # print(Z.shape)

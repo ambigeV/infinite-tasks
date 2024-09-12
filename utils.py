@@ -110,6 +110,35 @@ def plot_iteration_convergence(results, method_list, task_id):
     plt.legend()
 
 
+def ax_plot_iteration_convergence(ax, results, method_list, task_id):
+
+    # Combine tensors into one tensor of shape [K, N, M]
+    combined_results = torch.stack(results)
+
+    # Calculate mean and standard deviation for each method
+    means = combined_results.mean(dim=2)  # Shape [K, N]
+    stds = combined_results.std(dim=2)  # Shape [K, N]
+
+    K, N = means.shape
+
+    # Plotting
+    methods = method_list
+    x = np.arange(N)  # x-axis: iterations
+
+    # plt.figure()
+    # Plot mean curves with standard deviation bands
+    for i in range(K):
+        ax.plot(x, means[i], label=methods[i])
+        ax.fill_between(x, means[i] - stds[i], means[i] + stds[i], alpha=0.2)
+
+    # Setting labels and title
+    # ax.set_xlabel('Iterations')
+    # ax.set_ylabel('Value')
+    ax.set_title('Task {}'.format(task_id + 1))
+    # if task_id == 5:
+    #     ax.legend()
+
+
 def plot_convergence(results, method_list):
     # Parameterize K from the length of the list
     K = len(results)
@@ -143,32 +172,33 @@ def plot_convergence(results, method_list):
 
 
 def plot_details(test_input, test_output, name, if_constrain=False):
-    # if if_constrain:
-    #     # Create scatter plot
-    #     plt.figure(figsize=(8, 6))
-    #     scatter = plt.scatter(test_input[:, 0], test_input[:, 1], c=1-test_output,
-    #                           cmap='inferno', s=10)
-    # else:
-    #     # Create scatter plot
-    #     plt.figure(figsize=(8, 6))
-    #     ind = test_output < 0.15
-    #     scatter = plt.scatter(test_input[ind, 0], test_input[ind, 1], c=1-test_output[ind],
-    #                           cmap='inferno', vmin=0, vmax=1, s=10)
-    #     # scatter = plt.contour(test_input[:, 0], test_input[:, 1], c=1-test_output, levels=10, cmap='viridis')
-    plt.figure(figsize=(8, 6))
-    num = len(test_output)
-    num = int(math.sqrt(num))
-    X = np.reshape(test_input[:, 0], (num, num))
-    Y = np.reshape(test_input[:, 1], (num, num))
-    Z = np.reshape(test_output[:], (num, num))
-    levels = [0, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25]
-    contour = plt.contour(X, Y, Z, levels=levels, colors='black')  # Contour lines
-    contour_filled = plt.contourf(X, Y, Z, levels=levels, cmap='viridis')  # Filled contours
-    plt.clabel(contour, inline=True, fontsize=10)
+    if if_constrain:
+        # Create scatter plot
+        plt.figure(figsize=(8, 6))
+        scatter = plt.scatter(test_input[:, 0], test_input[:, 1], c=1-test_output,
+                              cmap='inferno', s=10)
+    else:
+        # Create scatter plot
+        plt.figure(figsize=(8, 6))
+        maxmax = 100
+        ind = test_output < maxmax
+        scatter = plt.scatter(test_input[ind, 0], test_input[ind, 1], c=test_output[ind],
+                              cmap='inferno', vmin=0, vmax=maxmax, s=10)
+        # scatter = plt.contour(test_input[:, 0], test_input[:, 1], c=1-test_output, levels=10, cmap='viridis')
+    # plt.figure(figsize=(8, 6))
+    # num = len(test_output)
+    # num = int(math.sqrt(num))
+    # X = np.reshape(test_input[:, 0], (num, num))
+    # Y = np.reshape(test_input[:, 1], (num, num))
+    # Z = np.reshape(test_output[:], (num, num))
+    # levels = [0, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25]
+    # contour = plt.contour(X, Y, Z, levels=levels, colors='black')  # Contour lines
+    # contour_filled = plt.contourf(X, Y, Z, levels=levels, cmap='viridis')  # Filled contours
+    # plt.clabel(contour, inline=True, fontsize=10)
 
     # # Add color bar to show the color scale
-    # cbar = plt.colorbar(scatter)
-    # cbar.set_label('Output Value')
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('Output Value')
 
     plt.xlim(0, 1)
     plt.ylim(0, 1)

@@ -1,4 +1,5 @@
 import gpytorch
+import numpy
 from gpytorch.mlls import SumMarginalLogLikelihood
 import torch
 import torch.distributions as dist
@@ -43,6 +44,8 @@ class ModelList:
 
     def test(self, test_x):
         # return tensors of size [sample_size, no_of_models(dimension)]
+        if isinstance(test_x, numpy.ndarray):
+            test_x = torch.from_numpy(test_x).float()
 
         self.model.eval()
         self.likelihood.eval()
@@ -64,7 +67,10 @@ class ModelList:
 def evaluation(model, likelihood, test_x, if_grad=True):
     model.eval()
     likelihood.eval()
-    if isinstance(test_x, tuple):
+
+    if isinstance(test_x, numpy.ndarray):
+        observed_pred = likelihood(model(torch.from_numpy(test_x).float()))
+    elif isinstance(test_x, tuple):
         observed_pred = likelihood(model(*test_x))
     else:
         observed_pred = likelihood(model(test_x))
