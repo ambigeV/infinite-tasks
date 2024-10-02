@@ -4,6 +4,7 @@ import math
 import torch
 import time
 
+
 def get_linear_mat(k, task_params=2):
     mat_main_placeholder = np.zeros((task_params, k))
     mat_placeholder = np.zeros((2, k))
@@ -22,6 +23,10 @@ def get_linear_mat(k, task_params=2):
         return mat_main_placeholder.T
     else:
         return mat_placeholder.T
+
+
+def nonlinear_map(x):
+    return (np.sin(5 * (x + 0.5)) + 1) / 2
 
 
 def get_constant_mat(k, task_params=2):
@@ -65,9 +70,11 @@ def get_problem(name, problem_params=None, task_params=2):
         'perfect_sphere': Sphere(n_dim=problem_params, mode="perfect"),
         'linear_sphere': Sphere(n_dim=problem_params, mode="linear"),
         'linear_sphere_high': Sphere(n_dim=problem_params, mode="linear", task_param=task_params),
+        'nonlinear_sphere_high': Sphere(n_dim=problem_params, mode="nonlinear", task_param=task_params),
         'perfect_ackley': Ackley(n_dim=problem_params, mode="perfect"),
         'linear_ackley': Ackley(n_dim=problem_params, mode="linear"),
         'linear_ackley_high': Ackley(n_dim=problem_params, mode="linear", task_param=task_params),
+        'nonlinear_ackley_high': Ackley(n_dim=problem_params, mode="nonlinear", task_param=task_params),
         'perfect_rastrigin': Rastrigin(n_dim=problem_params, mode="perfect"),
         'linear_rastrigin': Rastrigin(n_dim=problem_params, mode="linear"),
         'perfect_rastrigin_10': Rastrigin(n_dim=problem_params, mode="perfect", factor=10),
@@ -116,7 +123,7 @@ class Sphere:
         shift_mat = None
         if self.mode == "perfect":
             shift_mat = get_constant_mat(self.n_dim, task_param)
-        elif self.mode == "linear":
+        elif self.mode == "linear" or self.mode == "nonlinear":
             shift_mat = get_linear_mat(self.n_dim, task_param)
         else:
             pass
@@ -129,6 +136,8 @@ class Sphere:
         sol = x[:self.n_dim]
         hook = x[self.n_dim:]
         shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+        if self.mode == "nonlinear":
+            shift = nonlinear_map(shift)
 
         return np.sum(np.power(sol * self.factor - shift * self.factor, 2))
 
@@ -141,7 +150,7 @@ class Ackley:
         shift_mat = None
         if self.mode == "perfect":
             shift_mat = get_constant_mat(self.n_dim, task_param)
-        elif self.mode == "linear":
+        elif self.mode == "linear" or self.mode == "nonlinear":
             shift_mat = get_linear_mat(self.n_dim, task_param)
         else:
             pass
@@ -163,6 +172,8 @@ class Ackley:
         sol = x[:self.n_dim]
         hook = x[self.n_dim:]
         shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+        if self.mode == "nonlinear":
+            shift = nonlinear_map(shift)
 
         return -20 * np.exp(-0.2 * np.sqrt(np.mean(np.power(sol * self.factor - shift * self.factor, 2)))) - \
             np.exp(np.mean(np.cos(2 * np.pi * self.factor * (sol - shift)))) + 20 + np.exp(1)
@@ -235,5 +246,5 @@ if __name__ == "__main__":
     # en = time.time()
     # print("lasting time is {}s".format(en - st))
 
-    print(get_linear_mat(4))
+    print(get_linear_mat(4, 5))
 
