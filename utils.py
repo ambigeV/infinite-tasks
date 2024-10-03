@@ -6,9 +6,10 @@ import torch
 import numpy as np
 
 
-def cvt(x, k, verbose=False):
+def cvt(x, k, sample_weight=None, verbose=False):
     k_means = KMeans(init='k-means++', n_clusters=k, n_init=1, verbose=False)
-    k_means.fit(x)
+    # print(sample_weight)
+    k_means.fit(x, sample_weight=sample_weight)
     X = k_means.cluster_centers_
     return X, k_means
 
@@ -180,7 +181,7 @@ def plot_details(test_input, test_output, name, if_constrain=False):
     else:
         # Create scatter plot
         plt.figure(figsize=(8, 6))
-        maxmax = 100
+        maxmax = 0.5
         ind = test_output < maxmax
         scatter = plt.scatter(test_input[ind, 0], test_input[ind, 1], c=test_output[ind],
                               cmap='inferno', vmin=0, vmax=maxmax, s=10)

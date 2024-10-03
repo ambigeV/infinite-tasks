@@ -4,7 +4,8 @@ import time
 import gpytorch
 import torch
 import numpy as np
-from models import VanillaGP, ModelList, next_sample, device, model_lcb, evaluation
+from models import VanillaGP, ModelList, next_sample, device, \
+    model_lcb, evaluation, compute_gradient_list
 from problems import get_problem
 from utils import plot_hist, cvt, plot_tot, plot_box, \
     plot_details, plot_convergence, plot_iteration_convergence, \
@@ -26,7 +27,11 @@ from scipy.stats import qmc
 # method_name_list = ["10_50_ind_gp_ard",
 #                     "10_50_fixed_context_gp_ard"]
 method_name_list = ["10_50_ind_gp_hetero",
-                    "10_50_fixed_context_gp_hetero"]
+                    "10_50_fixed_context_gp_hetero",
+                    "10_50_fixed_switch_context_gp"]
+                    # "20_50_context_gp",
+                    # "20_50_context_gp_plain",
+                    # "20_50_fixed_switch_context_gp"]
                     # "20_50_fixed_context_gp_fixed"]
                     # "20_50_fixed_context_inverse_random_cut_gp"]
                     # "20_50_context_gp_plain",
@@ -48,7 +53,7 @@ method_name_list = ["10_50_ind_gp_hetero",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "linear_ackley_high"
+problem_name = "nonlinear_sphere_high"
 # problem_name = "linear_ackley"
 dim_size = 4
 task_params = 5 # Default value should be 2
@@ -90,6 +95,8 @@ def configure_method(method_name):
     params["if_random"] = False
     params["if_active"] = False
     params["if_switch"] = False
+    params["if_active_uncertain"] = False
+    params["if_active_gradient"] = False
     params["method_name"] = method_name
 
     if method_name == "ind_gp":
@@ -103,6 +110,20 @@ def configure_method(method_name):
 
     if method_name == "context_gp_plain":
         params["if_cluster"] = False
+
+    if method_name == "active_gradient_context_gp_plain":
+        params["if_cluster"] = False
+        params["if_inner_cluster"] = True
+        params["if_inverse"] = True
+        params["if_active"] = True
+        params["if_active_gradient"] = True
+
+    if method_name == "active_uncertain_context_gp_plain":
+        params["if_cluster"] = False
+        params["if_inner_cluster"] = True
+        params["if_inverse"] = True
+        params["if_active"] = True
+        params["if_active_uncertain"] = True
 
     if method_name == "forward_inverse_context_gp_plain":
         params["if_inner_cluster"] = True
@@ -193,6 +214,8 @@ def solver(problem_params, method_params, trial):
     if_inner_cluster = method_params["if_inner_cluster"]
     if_switch = method_params["if_switch"]
     method_name = method_params["method_name"]
+    if_active_uncertain = method_params["if_active_uncertain"]
+    if_active_gradient = method_params["if_active_gradient"]
 
     # Fetch problem parameters
     ind_size = problem_params["ind_size"]
@@ -231,7 +254,7 @@ def solver(problem_params, method_params, trial):
             # else:
             #     pass
         if if_fixed and if_switch:
-            task_list = fetch_task_lhs(n_task_params, switch_size)
+            task_list = torch.stack(fetch_task_lhs(n_task_params, switch_size))
             switch_list = task_list
             switch_count_vec = torch.zeros(switch_size)
 
@@ -246,8 +269,10 @@ def solver(problem_params, method_params, trial):
 
         if if_fixed and not if_switch:
             bayesian_best_results = torch.ones(ind_size, n_dim + n_task_params + n_obj) * 1e6
-        if if_fixed and if_switch:
+        elif if_fixed and if_switch:
             bayesian_best_results = torch.ones(switch_size, n_dim + n_task_params + n_obj) * 1e6
+        else:
+            bayesian_best_results = torch.ones(ind_size, n_dim + n_task_params + n_obj) * 1e6
         bayesian_cut_results = torch.Tensor([])
 
     # Prepare initialization
@@ -371,10 +396,11 @@ def solver(problem_params, method_params, trial):
                     pass
 
                 # Use inverse models to retrieve the active tasks
-                candidate_sort = None
-                switch_list = None
+                # candidate_sort = None
+                # switch_list = None
                 if if_switch and if_inverse and j % 5 == 0:
                     # Input switch list and return the according uncertainty list
+                    # print("switch_list shape:{}".format(switch_list))
                     candidate_mean, candidate_std = inverse_model_list.test(switch_list)
                     candidate_entropy = torch.sum(candidate_std, dim=1)
                     candidate_sort = torch.argsort(candidate_entropy, descending=True)
@@ -513,7 +539,7 @@ def solver(problem_params, method_params, trial):
                                     bayesian_best_results[task_id, :] = bayesian_vector_list[task_id][task_sum, :]
                                     print("Task {} in Iteration {}: Best Obj {}".format(task_id + 1, task_sum + 1,
                                                                                         bayesian_vector_list[task_id][task_sum, -1]))
-                                    print("Task {} in Iteration {}: Best Sol {}".format(i + 1, j + 1,
+                                    print("Task {} in Iteration {}: Best Sol {}".format(task_id + 1, task_sum + 1,
                                                                                         bayesian_vector_list[task_id][task_sum, :n_dim]))
         else:
             for j in range(sample_size, cut_size):
@@ -724,7 +750,8 @@ def solver(problem_params, method_params, trial):
             if_current_active = False
 
             if if_active:
-                if_current_active = (j % 5 == 0)
+                if np.random.rand(1) < 0.5:
+                    if_current_active = True
 
             print("Trial {}: Iteration {}".format(trial+1, j+1))
             model_list_prepare = []
@@ -744,15 +771,17 @@ def solver(problem_params, method_params, trial):
             model_list.train()
 
             # Train an inverse model
-            if if_inverse and if_active:
+            if if_inverse and if_current_active:
                 temp_bayesian_best_results = torch.Tensor([])
                 if if_inner_cluster:
                     # determine the cluster centers
                     num_clusters = 20
-                    min_size = 1
+                    min_size = 3
                     clusters = dict()
                     centers, cvt_model = cvt(bayesian_vector[:cur_tot, n_dim:(n_dim + n_task_params)].numpy(),
-                                             num_clusters)
+                                             num_clusters,
+                                             1 - bayesian_vector[:cur_tot, -1].numpy() /
+                                             np.max(bayesian_vector[:cur_tot, -1].numpy()))
                     # decompose tensors into clusters
                     cluster_results = cvt_model.predict(bayesian_vector[:cur_tot, n_dim:(n_dim + n_task_params)].numpy())
                     for c_id in range(num_clusters):
@@ -788,7 +817,9 @@ def solver(problem_params, method_params, trial):
 
                 # Train the models
                 # We train each model collaboratively
-                inverse_model_list = ModelList(inverse_model_list_prepare, inverse_likelihood_list_prepare, train_iter)
+                inverse_model_list = ModelList(inverse_model_list_prepare,
+                                               inverse_likelihood_list_prepare,
+                                               train_iter * 3)
                 inverse_model_list.train()
 
                 # if not if_forward:
@@ -813,13 +844,36 @@ def solver(problem_params, method_params, trial):
             # Use model_list and inverse_model_list
             # to conduct an ec_iter EC algorithm so that
             # one (n_task_params, ) vector can be obtained
-            ec_iter = 50
-            ec_gen = 100
+
             timest = time.time()
             if not if_current_active:
                 task_list = torch.rand(ind_size, n_task_params)
             else:
-                task_list = ec_alg_moo(model_list, inverse_model_list, ec_gen, ec_iter, n_dim, n_task_params)
+                sample_coef = 100
+                if if_active_uncertain:
+                    sampled_ind_size = ind_size * sample_coef
+                    candidate_task_list = torch.rand(sampled_ind_size, n_task_params)
+                    candidate_mean, candidate_std = inverse_model_list.test(candidate_task_list)
+                    candidate_score = torch.sum(candidate_std, dim=1)
+
+                elif if_active_gradient:
+                    sampled_ind_size = ind_size * sample_coef
+                    candidate_task_list = torch.rand(sampled_ind_size, n_task_params)
+                    candidate_score = compute_gradient_list(inverse_model_list,
+                                                            candidate_task_list,
+                                                            mode=1)
+                else:
+                    assert 1 == 3
+
+                # Clustering and do the batch sampling
+                num_clusters = ind_size
+                clusters = dict()
+                centers, cvt_model = cvt(candidate_task_list,
+                                         num_clusters,
+                                         candidate_score)
+                # decompose tensors into clusters
+                task_list = torch.from_numpy(centers).float()
+
             timeen = time.time()
             print("Time cost for this iteration is {}.".format(timeen - timest))
 
@@ -970,7 +1024,7 @@ def solver(problem_params, method_params, trial):
         model_records["dim"] = n_dim
 
         # determine the cluster centers
-        num_clusters = 20
+        num_clusters = task_number
         min_size = 5
         clusters = dict()
         centers, cvt_model = cvt(bayesian_vector[:, n_dim:(n_dim + n_task_params)].numpy(),
@@ -1189,12 +1243,12 @@ def compare_all(n_task_params=2, mode="canonical"):
     # test_data
     # test_tot = 10000
     # test_data = torch.rand(test_tot, 2)
+    # sample_width = 8
+    # test_tot = sample_width ** n_task_params
+    # test_data = uniform_sample(sample_width, n_task_params)
     sample_width = 100
     test_tot = sample_width ** n_task_params
     test_data = uniform_sample(sample_width, n_task_params)
-    # sample_width = 100
-    # test_tot = sample_width ** n_task_params
-    # test_data = uniform_sample(sample_width, n_task_params)
     # test_tot = 20
     # test_data = torch.stack(fetch_task_lhs(5, 20))
     # test_data = torch.rand(test_tot, n_task_params)
@@ -1203,7 +1257,7 @@ def compare_all(n_task_params=2, mode="canonical"):
 
     # method_name = "context_gp"
     # problem_name = problem_name
-    trial_number_tot = 1
+    trial_number_tot = 10
 
     # problem
     problem = get_problem(problem_name, dim_size, n_task_params)
@@ -1344,9 +1398,9 @@ def fetch_task_lhs(task_param=2, task_size=10):
 
 if __name__ == "__main__":
     # main_solver(trials=10, method_name="ind_gp")
-    main_solver(trials=10, method_name="fixed_context_gp")
+    # main_solver(trials=10, method_name="fixed_context_gp")
     # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
-    # main_solver(trials=10, method_name="context_gp_plain")
+    main_solver(trials=10, method_name="active_uncertain_context_gp_plain")
     # main_solver(trials=10, method_name="fixed_context_inverse_cut_gp")
     # main_solver(trials=10, method_name="forward_inverse_fixed_context_gp_plain")
     # trial_num = 1

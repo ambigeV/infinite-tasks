@@ -3,6 +3,7 @@ import numpy
 from gpytorch.mlls import SumMarginalLogLikelihood
 import torch
 import torch.distributions as dist
+import matplotlib.pyplot as plt
 from utils import plot_grad
 
 device = torch.device("cpu")
@@ -28,19 +29,33 @@ class ModelList:
         self.likelihood = gpytorch.likelihoods.LikelihoodList(*likelihood_list)
         self.train_iter = train_iter
 
-    def train(self):
+    def train(self, if_debug=False):
+        losses = []
+
         mll = SumMarginalLogLikelihood(self.likelihood, self.model)
         self.model.train()
         self.likelihood.train()
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-2)
+        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+        #                                                  milestones=[0.5 * self.train_iter,
+        #                                                              0.75 * self.train_iter], gamma=0.5)
 
         for i in range(self.train_iter):
             optimizer.zero_grad()
             output = self.model(*self.model.train_inputs)
             loss = -mll(output, self.model.train_targets)
+            losses.append(torch.mean(loss).item())
             loss.backward()
             optimizer.step()
+            # scheduler.step()
+
+        if if_debug:
+            fig, ax = plt.subplots(figsize=(10, 5))
+
+            ax.plot(losses)
+            ax.set(title="Loss", xlabel="Iterations", ylabel="Negative Log-Likelihood")
+            plt.show()
 
     def test(self, test_x):
         # return tensors of size [sample_size, no_of_models(dimension)]
@@ -62,6 +77,52 @@ class ModelList:
         std_ans = torch.clamp(std_ans.detach(), 0, 1)
 
         return mean_ans, std_ans
+
+
+def compute_gradient_list(inverse_model_list, x_test: torch.Tensor, mode=1):
+    num_models = len(inverse_model_list.model.models)
+    num_samples, _ = x_test.shape
+    ans = torch.zeros(num_samples)
+
+    for i in range(num_models):
+        cur_ans = compute_gradient(inverse_model_list.model.models[i],
+                                   inverse_model_list.likelihood.likelihoods[i],
+                                   x_test,
+                                   mode)
+
+        ans = ans + torch.mean(cur_ans, dim=1)
+
+    return ans / num_models
+
+
+def compute_gradient(model, likelihood, x_test: torch.Tensor, mode=1):
+    model.eval()
+    likelihood.eval()
+
+    X = torch.autograd.Variable(torch.Tensor(x_test), requires_grad=True)
+
+    def mean_f(X):
+        return likelihood(model(X)).mean.sum()
+
+    def var_f(X):
+        return likelihood(model(X)).var.sum()
+
+    def mean_df(X):
+        return torch.autograd.functional.jacobian(mean_f, X, create_graph=True).sum()
+
+    def var_df(X):
+        return torch.autograd.functional.jacobian(var_f, X, create_graph=True).sum()
+
+    if mode == 1:
+        dydtest_x_ag = torch.autograd.functional.jacobian(mean_f, X)
+        ag = torch.abs(dydtest_x_ag.detach())
+        return ag
+    elif mode == 2:
+        dy2dtest_x2_ag = torch.autograd.functional.jacobian(mean_df, X)
+        ag = torch.abs(dy2dtest_x2_ag.detach())
+        return ag
+    else:
+        return None
 
 
 def evaluation(model, likelihood, test_x, if_grad=True):
