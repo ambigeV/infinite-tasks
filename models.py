@@ -4,6 +4,7 @@ from gpytorch.mlls import SumMarginalLogLikelihood
 import torch
 import torch.distributions as dist
 import matplotlib.pyplot as plt
+from LBFGS import FullBatchLBFGS
 from utils import plot_grad
 
 device = torch.device("cpu")
@@ -23,18 +24,35 @@ class VanillaGP(gpytorch.models.ExactGP):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 
+class ArdGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood):
+        super().__init__(train_x, train_y, likelihood)
+        self.no_of_data, self.no_of_dim = train_x.shape
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=self.no_of_dim))
+        # self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+
 class ModelList:
     def __init__(self, model_list, likelihood_list, train_iter):
         self.model = gpytorch.models.IndependentModelList(*model_list)
         self.likelihood = gpytorch.likelihoods.LikelihoodList(*likelihood_list)
         self.train_iter = train_iter
+        self.model_len = len(self.model.models)
 
     def train(self, if_debug=False):
         losses = []
+        model_lengthscales = [[] for i in range(self.model_len)]
+        likelihood_noises = [[] for i in range(self.model_len)]
 
-        mll = SumMarginalLogLikelihood(self.likelihood, self.model)
         self.model.train()
         self.likelihood.train()
+        mll = SumMarginalLogLikelihood(self.likelihood, self.model)
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-2)
         # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
@@ -46,15 +64,69 @@ class ModelList:
             output = self.model(*self.model.train_inputs)
             loss = -mll(output, self.model.train_targets)
             losses.append(torch.mean(loss).item())
+            if if_debug:
+                for j in range(self.model_len):
+                    model_lengthscales[j].append(self.model.models[j].covar_module.base_kernel.lengthscale.detach().item())
+                    likelihood_noises[j].append(self.likelihood.likelihoods[j].noise_covar.noise.detach().item())
             loss.backward()
             optimizer.step()
             # scheduler.step()
 
         if if_debug:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            losses = [losses]
+            losses = losses + model_lengthscales + likelihood_noises
 
-            ax.plot(losses)
-            ax.set(title="Loss", xlabel="Iterations", ylabel="Negative Log-Likelihood")
+            fig, axs = plt.subplots(3, 3, figsize=(10, 10))
+
+            for i, ax in enumerate(axs.flat):
+                ax.plot(losses[i])
+            # ax.set(title="Loss", xlabel="Iterations", ylabel="Negative Log-Likelihood")
+            plt.tight_layout()
+            plt.show()
+
+    def high_train(self, if_debug=False):
+        losses = []
+        model_lengthscales = [[] for i in range(self.model_len)]
+        likelihood_noises = [[] for i in range(self.model_len)]
+
+        self.model.train()
+        self.likelihood.train()
+        mll = SumMarginalLogLikelihood(self.likelihood, self.model)
+
+        optimizer = FullBatchLBFGS(self.model.parameters())
+        # optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-1)
+        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+        #                                                  milestones=[0.5 * self.train_iter,
+        #                                                              0.75 * self.train_iter], gamma=0.5)
+
+        def closure():
+            optimizer.zero_grad()
+            output = self.model(*self.model.train_inputs)
+            loss = -mll(output, self.model.train_targets)
+            return loss
+
+        loss = closure()
+        loss.backward()
+
+        for i in range(self.train_iter):
+            options = {'closure': closure, 'current_loss': loss, 'max_ls': 10}
+            loss, _, lr, _, F_eval, G_eval, _, _ = optimizer.step(options)
+            losses.append(torch.mean(loss).item())
+            if if_debug:
+                for j in range(self.model_len):
+                    model_lengthscales[j].append(self.model.models[j].covar_module.base_kernel.lengthscale.detach().item())
+                    likelihood_noises[j].append(self.likelihood.likelihoods[j].noise_covar.noise.detach().item())
+
+        if if_debug:
+            losses = [losses]
+            losses = losses + model_lengthscales + likelihood_noises
+
+            fig, axs = plt.subplots(3, 3, figsize=(10, 10))
+
+            for i, ax in enumerate(axs.flat):
+                ax.plot(losses[i])
+            # ax.set(title="Loss", xlabel="Iterations", ylabel="Negative Log-Likelihood")
+            plt.tight_layout()
             plt.show()
 
     def test(self, test_x):
