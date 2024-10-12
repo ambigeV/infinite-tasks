@@ -5,7 +5,7 @@ import gpytorch
 import torch
 import numpy as np
 from models import VanillaGP, ModelList, next_sample, device, \
-    model_lcb, evaluation, compute_gradient_list
+    model_lcb, evaluation, compute_gradient_list, ArdGP
 from problems import get_problem
 from utils import plot_hist, cvt, plot_tot, plot_box, \
     plot_details, plot_convergence, plot_iteration_convergence, \
@@ -26,9 +26,11 @@ from scipy.stats import qmc
 
 # method_name_list = ["10_50_ind_gp_ard",
 #                     "10_50_fixed_context_gp_ard"]
-method_name_list = ["10_50_ind_gp_hetero",
-                    "10_50_fixed_context_gp_hetero",
-                    "10_50_fixed_switch_context_gp"]
+method_name_list = ["20_50_ind_gp",
+                    "20_50_fixed_context_gp",
+                    "20_50_context_gp_plain",
+                    "20_50_active_uncertain_context_gp_plain",
+                    "20_50_active_gradient_context_gp_plain"]
                     # "20_50_context_gp",
                     # "20_50_context_gp_plain",
                     # "20_50_fixed_switch_context_gp"]
@@ -53,7 +55,7 @@ method_name_list = ["10_50_ind_gp_hetero",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "nonlinear_sphere_high"
+problem_name = "nonlinear_ackley_high"
 # problem_name = "linear_ackley"
 dim_size = 4
 task_params = 5 # Default value should be 2
@@ -71,8 +73,8 @@ def configure_problem(problem_name):
     params["tot_budget"] = 2000
     # params["tot_budget"] = 300
     params["aqf"] = "ucb"
-    params["train_iter"] = 200
-    params["test_iter"] = 30
+    params["train_iter"] = 300
+    params["test_iter"] = 50
     params["switch_size"] = task_number * 2
     params["problem_name"] = problem_name
     params["n_obj"] = 1
@@ -97,6 +99,7 @@ def configure_method(method_name):
     params["if_switch"] = False
     params["if_active_uncertain"] = False
     params["if_active_gradient"] = False
+    params["mode"] = None
     params["method_name"] = method_name
 
     if method_name == "ind_gp":
@@ -117,6 +120,15 @@ def configure_method(method_name):
         params["if_inverse"] = True
         params["if_active"] = True
         params["if_active_gradient"] = True
+        params["mode"] = 1
+
+    if method_name == "active_hessian_context_gp_plain":
+        params["if_cluster"] = False
+        params["if_inner_cluster"] = True
+        params["if_inverse"] = True
+        params["if_active"] = True
+        params["if_active_gradient"] = True
+        params["mode"] = 2
 
     if method_name == "active_uncertain_context_gp_plain":
         params["if_cluster"] = False
@@ -216,6 +228,7 @@ def solver(problem_params, method_params, trial):
     method_name = method_params["method_name"]
     if_active_uncertain = method_params["if_active_uncertain"]
     if_active_gradient = method_params["if_active_gradient"]
+    method_mode = method_params["mode"]
 
     # Fetch problem parameters
     ind_size = problem_params["ind_size"]
@@ -802,12 +815,20 @@ def solver(problem_params, method_params, trial):
                     # Then we combine them into a single ModelList class
                     inverse_likelihood = gpytorch.likelihoods.GaussianLikelihood()
                     if not if_inner_cluster:
-                        inverse_model = VanillaGP(
+                        # inverse_model = VanillaGP(
+                        #     bayesian_vector[:cur_tot, n_dim:(n_dim + n_task_params)],
+                        #     bayesian_vector[:cur_tot, d],
+                        #     inverse_likelihood)
+                        inverse_model = ArdGP(
                             bayesian_vector[:cur_tot, n_dim:(n_dim + n_task_params)],
                             bayesian_vector[:cur_tot, d],
                             inverse_likelihood)
                     else:
-                        inverse_model = VanillaGP(
+                        # inverse_model = VanillaGP(
+                        #     temp_bayesian_best_results[:, n_dim:(n_dim + n_task_params)],
+                        #     temp_bayesian_best_results[:, d],
+                        #     inverse_likelihood)
+                        inverse_model = ArdGP(
                             temp_bayesian_best_results[:, n_dim:(n_dim + n_task_params)],
                             temp_bayesian_best_results[:, d],
                             inverse_likelihood)
@@ -861,7 +882,7 @@ def solver(problem_params, method_params, trial):
                     candidate_task_list = torch.rand(sampled_ind_size, n_task_params)
                     candidate_score = compute_gradient_list(inverse_model_list,
                                                             candidate_task_list,
-                                                            mode=1)
+                                                            mode=method_mode)
                 else:
                     assert 1 == 3
 
@@ -1025,7 +1046,7 @@ def solver(problem_params, method_params, trial):
 
         # determine the cluster centers
         num_clusters = task_number
-        min_size = 5
+        min_size = n_task_params
         clusters = dict()
         centers, cvt_model = cvt(bayesian_vector[:, n_dim:(n_dim + n_task_params)].numpy(),
                                  num_clusters)
@@ -1243,17 +1264,17 @@ def compare_all(n_task_params=2, mode="canonical"):
     # test_data
     # test_tot = 10000
     # test_data = torch.rand(test_tot, 2)
-    # sample_width = 8
-    # test_tot = sample_width ** n_task_params
-    # test_data = uniform_sample(sample_width, n_task_params)
-    sample_width = 100
+    sample_width = 10
     test_tot = sample_width ** n_task_params
     test_data = uniform_sample(sample_width, n_task_params)
+    # sample_width = 100
+    # test_tot = sample_width ** n_task_params
+    # test_data = uniform_sample(sample_width, n_task_params)
     # test_tot = 20
     # test_data = torch.stack(fetch_task_lhs(5, 20))
     # test_data = torch.rand(test_tot, n_task_params)
-    print(test_data)
-    print(test_data.shape)
+    # print(test_data)
+    # print(test_data.shape)
 
     # method_name = "context_gp"
     # problem_name = problem_name
@@ -1292,10 +1313,10 @@ def compare_all(n_task_params=2, mode="canonical"):
         std_lists.append(torch.std(results_lists, dim=0).numpy())
         sol_lists.append(sols_lists)
 
-        plot_details(test_data.numpy(), torch.mean(results_lists, dim=0).numpy(), method_name)
+        # plot_details(test_data.numpy(), torch.mean(results_lists, dim=0).numpy(), method_name)
         # plot_tot(results_lists, m_id + 1, method_name_list)
     # plot_box(result_lists, method_name_list)
-    # plot_box(result_lists, ["Strategy 1", "Strategy 2", "Strategy 3"])
+    plot_box(result_lists, ["Strategy 1", "Strategy 2", "Strategy 3", "Strategy 4", "Strategy 5"])
     # plot_box(result_lists, ["Strategy 1", "Strategy 2"])
     plt.show()
     while True:
@@ -1400,7 +1421,7 @@ if __name__ == "__main__":
     # main_solver(trials=10, method_name="ind_gp")
     # main_solver(trials=10, method_name="fixed_context_gp")
     # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
-    main_solver(trials=10, method_name="active_uncertain_context_gp_plain")
+    # main_solver(trials=10, method_name="active_uncertain_context_gp_plain")
     # main_solver(trials=10, method_name="fixed_context_inverse_cut_gp")
     # main_solver(trials=10, method_name="forward_inverse_fixed_context_gp_plain")
     # trial_num = 1
@@ -1429,6 +1450,6 @@ if __name__ == "__main__":
     # plt.scatter(tasks_7[:, 0], tasks_7[:, 1], alpha=0.2, label="Forward-Inverse")
     # plt.legend()
     # plt.show()
-    # compare_all(n_task_params=task_params)
+    compare_all(n_task_params=task_params)
     # compare_convergence()
 
