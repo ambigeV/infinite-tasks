@@ -55,7 +55,7 @@ method_name_list = ["20_50_ind_gp",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "nonlinear_ackley_high"
+problem_name = "super_nonlinear_ackley_high"
 # problem_name = "linear_ackley"
 dim_size = 4
 task_params = 5 # Default value should be 2
@@ -785,8 +785,10 @@ def solver(problem_params, method_params, trial):
             if if_active:
                 if np.random.rand(1) < 0.5:
                     if_current_active = True
+                #if (j - 1) % 5 == 0:
+                #    if_current_active = True
 
-            print("Trial {}: Iteration {}".format(trial+1, j+1))
+            print("Trial {}: Iteration {}".format(trial + 1, j + 1))
             model_list_prepare = []
             likelihood_list_prepare = []
 
@@ -808,7 +810,7 @@ def solver(problem_params, method_params, trial):
                 temp_bayesian_best_results = torch.Tensor([])
                 if if_inner_cluster:
                     # determine the cluster centers
-                    num_clusters = 20
+                    num_clusters = task_number
                     min_size = 3
                     clusters = dict()
                     centers, cvt_model = cvt(bayesian_vector[:cur_tot, n_dim:(n_dim + n_task_params)].numpy(),
@@ -1081,7 +1083,7 @@ def solver(problem_params, method_params, trial):
         model_records["dim"] = n_dim
 
         # determine the cluster centers
-        num_clusters = task_number
+        num_clusters = task_number  
         min_size = n_task_params
         clusters = dict()
         centers, cvt_model = cvt(bayesian_vector[:, n_dim:(n_dim + n_task_params)].numpy(),
@@ -1139,6 +1141,8 @@ def solver(problem_params, method_params, trial):
             model_records["tasks"] = bayesian_vector[:, n_dim:(n_dim + n_task_params)]
         # Save the records
         model_records["record_tasks"] = bayesian_best_results
+        # Save the total
+        model_records["all_tasks"] = bayesian_vector
         # Save the model state_dict
         model_records["model_tasks"] = model_list.model.state_dict()
         # Save the likelihood state_dict
@@ -1461,7 +1465,8 @@ if __name__ == "__main__":
     # main_solver(trials=10, method_name="ind_gp")
     # main_solver(trials=10, method_name="fixed_context_gp")
     # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
-    main_solver(trials=10, method_name="active_ec_gradient_context_gp_plain")
+    main_solver(trials=3, method_name="active_ec_gradient_context_gp_plain")
+    main_solver(trials=3, method_name="active_ec_hessian_context_gp_plain")
     # main_solver(trials=10, method_name="fixed_context_inverse_cut_gp")
     # main_solver(trials=10, method_name="forward_inverse_fixed_context_gp_plain")
     # trial_num = 1
