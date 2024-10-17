@@ -27,10 +27,10 @@ from scipy.stats import qmc
 # method_name_list = ["10_50_ind_gp_ard",
 #                     "10_50_fixed_context_gp_ard"]
 method_name_list = ["20_50_ind_gp",
-                    "20_50_fixed_context_gp",
-                    "20_50_context_gp_plain",
-                    "20_50_active_uncertain_context_gp_plain",
-                    "20_50_active_gradient_context_gp_plain"]
+                    "20_50_fixed_context_gp"]
+                    # "20_50_context_gp_plain",
+                    # "20_50_active_uncertain_context_gp_plain",
+                    # "20_50_active_gradient_context_gp_plain"]
                     # "20_50_context_gp",
                     # "20_50_context_gp_plain",
                     # "20_50_fixed_switch_context_gp"]
@@ -55,7 +55,7 @@ method_name_list = ["20_50_ind_gp",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "super_nonlinear_ackley_high"
+problem_name = "super_nonlinear_sphere_high"
 # problem_name = "linear_ackley"
 dim_size = 4
 task_params = 5 # Default value should be 2
@@ -1460,13 +1460,14 @@ def fetch_task_lhs(task_param=2, task_size=10):
 #                     "forward_inverse_context_gp_inner_plain",
 #                     "forward_inverse_context_gp_plain"]
 
+my_trials = 5
 
 if __name__ == "__main__":
-    # main_solver(trials=10, method_name="ind_gp")
-    # main_solver(trials=10, method_name="fixed_context_gp")
-    # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
-    main_solver(trials=3, method_name="active_ec_gradient_context_gp_plain")
-    main_solver(trials=3, method_name="active_ec_hessian_context_gp_plain")
+    # main_solver(trials=my_trials, method_name="ind_gp")
+    # main_solver(trials=my_trials, method_name="fixed_context_gp")
+    # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
+    # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
+    # main_solver(trials=my_trials, method_name="active_ec_hessian_context_gp_plain")
     # main_solver(trials=10, method_name="fixed_context_inverse_cut_gp")
     # main_solver(trials=10, method_name="forward_inverse_fixed_context_gp_plain")
     # trial_num = 1
@@ -1496,5 +1497,5 @@ if __name__ == "__main__":
     # plt.legend()
     # plt.show()
     # compare_all(n_task_params=task_params)
-    # compare_convergence()
+    compare_convergence()
 

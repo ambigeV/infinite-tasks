@@ -29,6 +29,10 @@ def nonlinear_map(x):
     return (np.sin(5 * (x + 0.5)) + 1) / 2
 
 
+def middle_nonlinear_map(x):
+    return 0.3 * (1 + np.sin(5 * np.pi * x - np.pi / 2)) + 0.3 * np.square(x - 0.2)
+
+
 def super_nonlinear_map(x):
     return 0.3 * (1 + np.sin(10 * np.pi * x - np.pi / 2)) + 0.3 * np.square(x - 0.2)
 
@@ -74,16 +78,20 @@ def get_problem(name, problem_params=None, task_params=2):
         'perfect_sphere': Sphere(n_dim=problem_params, mode="perfect"),
         'linear_sphere': Sphere(n_dim=problem_params, mode="linear"),
         'nonlinear_sphere': Sphere(n_dim=problem_params, mode="nonlinear"),
+        'middle_nonlinear_sphere': Sphere(n_dim=problem_params, mode="middle_nonlinear"),
         'super_nonlinear_sphere': Sphere(n_dim=problem_params, mode="super_nonlinear"),
         'linear_sphere_high': Sphere(n_dim=problem_params, mode="linear", task_param=task_params),
         'nonlinear_sphere_high': Sphere(n_dim=problem_params, mode="nonlinear", task_param=task_params),
+        'middle_nonlinear_sphere_high': Sphere(n_dim=problem_params, mode="middle_nonlinear", task_param=task_params),
         'super_nonlinear_sphere_high': Sphere(n_dim=problem_params, mode="super_nonlinear", task_param=task_params),
         'perfect_ackley': Ackley(n_dim=problem_params, mode="perfect"),
         'linear_ackley': Ackley(n_dim=problem_params, mode="linear"),
         'nonlinear_ackley': Ackley(n_dim=problem_params, mode="nonlinear"),
+        'middle_nonlinear_ackley': Ackley(n_dim=problem_params, mode="middle_nonlinear"),
         'super_nonlinear_ackley': Ackley(n_dim=problem_params, mode="super_nonlinear"),
         'linear_ackley_high': Ackley(n_dim=problem_params, mode="linear", task_param=task_params),
         'nonlinear_ackley_high': Ackley(n_dim=problem_params, mode="nonlinear", task_param=task_params),
+        'middle_nonlinear_ackley_high': Ackley(n_dim=problem_params, mode="middle_nonlinear", task_param=task_params),
         'super_nonlinear_ackley_high': Ackley(n_dim=problem_params, mode="super_nonlinear", task_param=task_params),
         'perfect_rastrigin': Rastrigin(n_dim=problem_params, mode="perfect"),
         'linear_rastrigin': Rastrigin(n_dim=problem_params, mode="linear"),
@@ -133,7 +141,10 @@ class Sphere:
         shift_mat = None
         if self.mode == "perfect":
             shift_mat = get_constant_mat(self.n_dim, task_param)
-        elif self.mode == "linear" or self.mode == "nonlinear" or self.mode == "super_nonlinear":
+        elif self.mode == "linear" or \
+                self.mode == "nonlinear" or \
+                self.mode == "super_nonlinear" or \
+                self.mode == "middle_nonlinear":
             shift_mat = get_linear_mat(self.n_dim, task_param)
         else:
             pass
@@ -148,6 +159,8 @@ class Sphere:
         shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
         if self.mode == "nonlinear":
             shift = nonlinear_map(shift)
+        if self.mode == "middle_nonlinear":
+            shift = middle_nonlinear_map(shift)
         if self.mode == "super_nonlinear":
             shift = super_nonlinear_map(shift)
 
@@ -162,7 +175,10 @@ class Ackley:
         shift_mat = None
         if self.mode == "perfect":
             shift_mat = get_constant_mat(self.n_dim, task_param)
-        elif self.mode == "linear" or self.mode == "nonlinear" or self.mode == "super_nonlinear":
+        elif self.mode == "linear" or \
+                self.mode == "nonlinear" or \
+                self.mode == "super_nonlinear" or \
+                self.mode == "middle_nonlinear":
             shift_mat = get_linear_mat(self.n_dim, task_param)
         else:
             pass
@@ -186,6 +202,8 @@ class Ackley:
         shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
         if self.mode == "nonlinear":
             shift = nonlinear_map(shift)
+        if self.mode == "middle_nonlinear":
+            shift = middle_nonlinear_map(shift)
         if self.mode == "super_nonlinear":
             shift = super_nonlinear_map(shift)
 

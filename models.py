@@ -64,7 +64,7 @@ class ModelList:
             output = self.model(*self.model.train_inputs)
             loss = -mll(output, self.model.train_targets)
             losses.append(torch.mean(loss).item())
-            if if_debug:
+            if if_debug and False:
                 for j in range(self.model_len):
                     model_lengthscales[j].append(self.model.models[j].covar_module.base_kernel.lengthscale.detach().item())
                     likelihood_noises[j].append(self.likelihood.likelihoods[j].noise_covar.noise.detach().item())
@@ -73,13 +73,13 @@ class ModelList:
             # scheduler.step()
 
         if if_debug:
-            losses = [losses]
-            losses = losses + model_lengthscales + likelihood_noises
+            # losses = [losses]
+            # losses = losses + model_lengthscales + likelihood_noises
 
-            fig, axs = plt.subplots(3, 3, figsize=(10, 10))
+            fig, ax = plt.subplots(figsize=(10, 5))
 
-            for i, ax in enumerate(axs.flat):
-                ax.plot(losses[i])
+            # for i, ax in enumerate(axs.flat):
+            ax.plot(losses)
             # ax.set(title="Loss", xlabel="Iterations", ylabel="Negative Log-Likelihood")
             plt.tight_layout()
             plt.show()
@@ -112,19 +112,19 @@ class ModelList:
             options = {'closure': closure, 'current_loss': loss, 'max_ls': 10}
             loss, _, lr, _, F_eval, G_eval, _, _ = optimizer.step(options)
             losses.append(torch.mean(loss).item())
-            if if_debug:
+            if if_debug and False:
                 for j in range(self.model_len):
                     model_lengthscales[j].append(self.model.models[j].covar_module.base_kernel.lengthscale.detach().item())
                     likelihood_noises[j].append(self.likelihood.likelihoods[j].noise_covar.noise.detach().item())
 
         if if_debug:
-            losses = [losses]
-            losses = losses + model_lengthscales + likelihood_noises
+            # losses = [losses]
+            # losses = losses + model_lengthscales + likelihood_noises
 
-            fig, axs = plt.subplots(3, 3, figsize=(10, 10))
+            fig, ax = plt.subplots(figsize=(10, 5))
 
-            for i, ax in enumerate(axs.flat):
-                ax.plot(losses[i])
+            # for i, ax in enumerate(axs.flat):
+            ax.plot(losses)
             # ax.set(title="Loss", xlabel="Iterations", ylabel="Negative Log-Likelihood")
             plt.tight_layout()
             plt.show()
