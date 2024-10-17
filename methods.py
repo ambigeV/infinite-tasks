@@ -11,7 +11,7 @@ from utils import plot_hist, cvt, plot_tot, plot_box, \
     plot_details, plot_convergence, plot_iteration_convergence, \
     debug_tot, debug_each, debug_hist, ax_plot_iteration_convergence
 import matplotlib.pyplot as plt
-from model_problems import ec_alg_moo, ec_active_moo
+from model_problems import ec_alg_moo, ec_active_moo, ec_active_myopic_moo
 from scipy.stats import qmc
 
 # method_name_list = ["ind_gp", "context_gp", "unified_gp",
@@ -101,7 +101,12 @@ def configure_method(method_name):
     params["if_active_gradient"] = False
     params["if_ec"] = False
     params["mode"] = None
+    params["if_pool"] = False
     params["method_name"] = method_name
+
+    if method_name == "pool_gp":
+        params["if_pool"] = True
+        params["mode"] = 1
 
     if method_name == "ind_gp":
         params["if_ind"] = True
@@ -244,6 +249,7 @@ def solver(problem_params, method_params, trial):
     if_active = method_params["if_active"]
     if_inner_cluster = method_params["if_inner_cluster"]
     if_switch = method_params["if_switch"]
+    if_pool = method_params["if_pool"]
     method_name = method_params["method_name"]
     if_active_uncertain = method_params["if_active_uncertain"]
     if_active_gradient = method_params["if_active_gradient"]
@@ -269,6 +275,18 @@ def solver(problem_params, method_params, trial):
     # What intermediate result do I want?
     # Final training data
     # Final inverse model
+
+    # What is the largest pool size?
+    pool_budget_max = tot_budget // ind_size
+    pool_max = 50
+    pool_active = ind_size
+    pool_budget = 0
+
+    pool_bayesian_vector = torch.zeros(tot_budget, n_dim + n_task_params + n_obj)
+    pool_budget_vector = torch.zeros(pool_max)
+    pool_bayesian_best_results = torch.ones(pool_max, n_dim + n_task_params + n_obj) * 1e6
+    pool_bayesian_vector_list = [torch.zeros(pool_budget_max, n_dim + n_task_params + n_obj)
+                                 for i in range(pool_max)]
 
     # Prepare solution placeholder
     bayesian_vector = torch.zeros(tot_budget, n_dim + n_task_params + n_obj)
@@ -338,6 +356,33 @@ def solver(problem_params, method_params, trial):
                         bayesian_best_results[i, :] = bayesian_vector_list[i][j, :]
                         print("Task {} in Iteration {}: Best Obj {}".format(i + 1, j + 1,
                                                                             bayesian_vector_list[i][j, -1]))
+    elif if_pool:
+        task_list = torch.stack(fetch_task_lhs(n_task_params, ind_size))
+        sample_size = tot_init // ind_size
+
+        # Initialize pool_max/pool_active/pool_budget
+        # Update pool_bayesian_vector/pool_budget_vector/pool_bayesian_best_results
+        for i in range(pool_active):
+            for j in range(sample_size):
+                # Store solution
+                pool_bayesian_vector[pool_budget, :n_dim] = torch.rand(n_dim)
+                # Store task parameter
+                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = task_list[i, :]
+                # Store objective value
+                pool_bayesian_vector[pool_budget, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                    problem.evaluate(pool_bayesian_vector[pool_budget, :(n_dim + n_task_params)])
+
+                # Update best results
+                if pool_bayesian_vector[pool_budget, -1] < pool_bayesian_best_results[i, -1]:
+                    pool_bayesian_best_results[i, :] = pool_bayesian_vector[pool_budget, :]
+                    print("Task {} in Iteration {}: Best Obj {}".format(i + 1,
+                                                                        j + 1,
+                                                                        pool_bayesian_vector[pool_budget, -1]))
+
+                # Update budget vector
+                pool_budget_vector[i] += 1
+                # Update total budget
+                pool_budget += 1
     else:
         # Randomly sample tasks
         task_list = torch.rand(tot_init, n_task_params)
@@ -774,6 +819,102 @@ def solver(problem_params, method_params, trial):
                 if j == tot_size - 1:
                     # move the cut_results to best results
                     bayesian_best_results = torch.cat([bayesian_best_results, bayesian_cut_results])
+    elif if_pool:
+        while pool_budget < tot_budget:
+            inverse_model_list = None
+            model_list = None
+            temp_vectors = None
+            model_list_prepare = []
+            likelihood_list_prepare = []
+
+            ####################################################################################
+            # Train Forward Model
+            temp_vectors = pool_bayesian_vector[:pool_budget, :]
+
+            likelihood = gpytorch.likelihoods.GaussianLikelihood()
+            model = VanillaGP(temp_vectors[:, :(n_dim + n_task_params)],
+                              temp_vectors[:, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
+                              likelihood)
+            # Insert it into a list
+            model_list_prepare.append(model)
+            likelihood_list_prepare.append(likelihood)
+
+            # Running the Train Method
+            model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter)
+            model_list.train()
+            ####################################################################################
+            # Train Inverse Model
+            temp_bayesian_best_results = pool_bayesian_best_results[:pool_active, :].clone()
+
+            # Build a unified inverse model from theta -> x
+            inverse_model_list_prepare = []
+            inverse_likelihood_list_prepare = []
+
+            # Actually Running the Train Method
+            for d in range(n_dim):
+                # For each inverse model, we have a dataset for each dimension (D totally)
+                # We first build D separate models via model list
+                # Then we combine them into a single ModelList class
+                inverse_likelihood = gpytorch.likelihoods.GaussianLikelihood()
+                inverse_model = ArdGP(
+                    temp_bayesian_best_results[:, n_dim:(n_dim + n_task_params)],
+                    temp_bayesian_best_results[:, d],
+                    inverse_likelihood)
+
+                inverse_likelihood_list_prepare.append(inverse_likelihood)
+                inverse_model_list_prepare.append(inverse_model)
+
+            inverse_model_list = ModelList(inverse_model_list_prepare,
+                                           inverse_likelihood_list_prepare,
+                                           train_iter * 3)
+            inverse_model_list.train()
+            ####################################################################################
+            # Fetch new task
+            ec_gen = 100
+            ec_iter = 50
+            ec_task_results = ec_active_myopic_moo(inverse_model_list,
+                                                   ec_gen, ec_iter,
+                                                   n_dim, n_task_params,
+                                                   1, method_mode, task_list)
+            ec_size, _ = ec_task_results.shape
+            new_task = ec_task_results[np.random.randint(ec_size), :].view(1, -1)
+            task_list = torch.cat([task_list, new_task])
+            # Increase the pool active
+            pool_active += 1
+            # Optimize Each Candidate Task via Forward Model
+            for i in range(pool_active - 1, -1, -1):
+                ans = next_sample([model_list.model.models[0]],
+                                  [model_list.likelihood.likelihoods[0]],
+                                  n_dim,
+                                  torch.tensor([1], dtype=torch.float32).to(device),
+                                  mode=2,
+                                  fixed_solution=task_list[i, :],
+                                  opt_iter=test_iter,
+                                  if_debug=False)
+                # ans should be in size of [n_dim, ]
+                param = ans.unsqueeze(0)
+                # attach the param and task_params
+                pool_bayesian_vector[pool_budget, :n_dim] = param.clone()
+                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = task_list[i, :]
+                # Evaluate the solution
+                pool_bayesian_vector[pool_budget, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                    problem.evaluate(pool_bayesian_vector[pool_budget, :(n_dim + n_task_params)])
+
+                # Update best results
+                if pool_bayesian_vector[pool_budget, -1] < pool_bayesian_best_results[i, -1]:
+                    pool_bayesian_best_results[i, :] = pool_bayesian_vector[pool_budget, :]
+                    print("Task {} in Iteration {}: Best Obj {}".format(i + 1,
+                                                                        pool_budget,
+                                                                        pool_bayesian_vector[pool_budget, -1]))
+
+                # Update budget vector
+                pool_budget_vector[i] += 1
+                # Update total budget
+                pool_budget += 1
+                if pool_budget >= tot_budget:
+                    break
+            # Update task pool
+            # Increase the pool active
     else:
         model_list = None
         inverse_model_list = None
@@ -1067,6 +1208,46 @@ def solver(problem_params, method_params, trial):
 
         # Save the records
         model_records["record_tasks"] = bayesian_best_results
+        # Save the model state_dict
+        model_records["model_tasks"] = model_list.model.state_dict()
+        # Save the likelihood state_dict
+        model_records["likelihood_tasks"] = model_list.likelihood.state_dict()
+
+        torch.save(model_records, "./{}/{}_{}_{}_{}.pth".format(direct_name,
+                                                                task_number,
+                                                                beta_ucb,
+                                                                method_name,
+                                                                trial))
+    elif if_pool:
+        model_records = dict()
+        model_records["ind"] = True
+        model_records["dim"] = n_dim
+        model_records["tasks"] = task_list
+
+        # Build a unified inverse model from theta -> x
+        model_list = None
+        model_list_prepare = []
+        likelihood_list_prepare = []
+
+        for d in range(n_dim):
+            # For each inverse model, we have a dataset for each dimension (D totally)
+            # We first build D separate models via model list
+            # Then we combine them into a single ModelList class
+            likelihood = gpytorch.likelihoods.GaussianLikelihood()
+            model = VanillaGP(
+                pool_bayesian_best_results[:pool_active, n_dim:(n_dim + n_task_params)],
+                bayesian_best_results[:pool_active, d],
+                likelihood)
+            likelihood_list_prepare.append(likelihood)
+            model_list_prepare.append(model)
+
+        # Train the models
+        # We train each model collaboratively
+        model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter * 3)
+        model_list.train()
+
+        # Save the records
+        model_records["record_tasks"] = pool_bayesian_best_results[:pool_active, :]
         # Save the model state_dict
         model_records["model_tasks"] = model_list.model.state_dict()
         # Save the likelihood state_dict
@@ -1463,6 +1644,7 @@ def fetch_task_lhs(task_param=2, task_size=10):
 my_trials = 5
 
 if __name__ == "__main__":
+    main_solver(trials=my_trials, method_name="pool_gp")
     # main_solver(trials=my_trials, method_name="ind_gp")
     # main_solver(trials=my_trials, method_name="fixed_context_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")

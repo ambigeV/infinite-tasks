@@ -140,6 +140,52 @@ class ModelGradient:
         return result.numpy()
 
 
+class ModelGradientMyopic:
+    def __init__(self, inverse_model_list: ModelList, n_dim, n_task_params, n_tasks, mode, ref_tasks):
+        self.inverse_model_list = inverse_model_list
+        self.n_dim = n_dim
+        self.n_obj = 2
+        self.n_task_params = n_task_params
+        self.n_tasks = n_tasks
+        self.mode = mode
+        self.ref_tasks = ref_tasks
+
+    def evaluate(self, solution: torch.tensor = None):
+
+        """
+        evaluate the given vector x_I and x_II with sample size of "sample_size"
+        and the class attributes p/s
+        :param: if_ans, False returns Pareto front, True returns the evaluated solutions
+        :return:
+        """
+        # print("solution shape is {}.".format(solution.shape))
+        n_sols, n_task_dim = solution.shape
+        assert n_task_dim == self.n_task_params * self.n_tasks
+
+        ###################################################################################
+        # Compute sum of the gradient information
+        new_solution = solution.reshape(-1, self.n_task_params)
+        new_solution_torch = torch.from_numpy(new_solution).float()
+
+        grad_result = compute_gradient_list(self.inverse_model_list, new_solution_torch, self.mode)
+        # grad_result: Tensor Shape: (n_sols * n_tasks, )
+        grad_result = grad_result.view(n_sols, -1)
+        grad_result = torch.mean(grad_result, dim=1)
+        # grad_result: Tensor Shape: (n_sols, )
+
+        ###################################################################################
+        # Compute the det(K(\Theta))
+        new_solution_torch = new_solution_torch.view(n_sols, self.n_tasks, self.n_task_params)
+        new_solution_torch = torch.cat([new_solution_torch,
+                                        self.ref_tasks.unsqueeze(0).repeat(n_sols, 1, 1)], dim=1)
+        data_result = model_det(self.inverse_model_list.model.models, new_solution_torch)
+        # data_result: Tensor Shape: (n_sols, )
+
+        result = - torch.cat([grad_result.unsqueeze(1), data_result.unsqueeze(1)], dim=1)
+
+        return result.numpy()
+
+
 def ec_alg_moo(model_list: ModelList, inverse_model_list: ModelList,
                ec_gen: int, ec_iter: int, n_dim: int, n_task_params: int):
     avg_size = 100
@@ -171,6 +217,38 @@ def ec_active_moo(inverse_model_list: ModelList, ec_gen: int, ec_iter: int, n_di
                   n_task_params: int, n_tasks: int, mode: int):
     sample_size = n_tasks
     problem_current = ModelGradient(inverse_model_list, n_dim, n_task_params, n_tasks, mode)
+    obj_problem = OPT(problem_current, n_var=problem_current.n_task_params * n_tasks, n_obj=problem_current.n_obj)
+    algorithm = NSGA2(pop_size=ec_gen)
+    res = minimize(obj_problem,
+                   algorithm,
+                   ('n_gen', ec_iter),
+                   seed=1,
+                   eliminate_duplicates=True,
+                   verbose=False)
+
+    tot_pf, _ = res.X.shape
+    print("Current_shape is {}".format(res.X.shape))
+    sample_tasks = torch.from_numpy(res.X).float()
+    # if sample_size <= tot_pf:
+    #     sample_tasks = torch.from_numpy(res.X[:sample_size]).float()
+    # else:
+    #     sample_tasks = torch.from_numpy(res.X).float()
+    #     new_sample_tasks = torch.rand(sample_size - tot_pf, n_task_params)
+    #     sample_tasks = torch.cat([sample_tasks, new_sample_tasks], dim=0)
+
+    return sample_tasks
+
+
+def ec_active_myopic_moo(inverse_model_list: ModelList, ec_gen: int, ec_iter: int, n_dim: int,
+                         n_task_params: int, n_tasks: int, mode: int, ref_tasks: torch.Tensor):
+    sample_size = n_tasks
+    assert n_tasks == 1
+    problem_current = ModelGradientMyopic(inverse_model_list,
+                                          n_dim,
+                                          n_task_params,
+                                          n_tasks,
+                                          mode,
+                                          ref_tasks)
     obj_problem = OPT(problem_current, n_var=problem_current.n_task_params * n_tasks, n_obj=problem_current.n_obj)
     algorithm = NSGA2(pop_size=ec_gen)
     res = minimize(obj_problem,
