@@ -55,7 +55,7 @@ method_name_list = ["20_50_ind_gp",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "super_nonlinear_sphere_high"
+problem_name = "nonlinear_sphere_high"
 # problem_name = "linear_ackley"
 dim_size = 4
 task_params = 5 # Default value should be 2
@@ -278,7 +278,7 @@ def solver(problem_params, method_params, trial):
 
     # What is the largest pool size?
     pool_budget_max = tot_budget // ind_size
-    pool_max = 50
+    pool_max = 80
     pool_active = ind_size
     pool_budget = 0
 
@@ -1236,7 +1236,7 @@ def solver(problem_params, method_params, trial):
             likelihood = gpytorch.likelihoods.GaussianLikelihood()
             model = VanillaGP(
                 pool_bayesian_best_results[:pool_active, n_dim:(n_dim + n_task_params)],
-                bayesian_best_results[:pool_active, d],
+                pool_bayesian_best_results[:pool_active, d],
                 likelihood)
             likelihood_list_prepare.append(likelihood)
             model_list_prepare.append(model)
@@ -1679,5 +1679,5 @@ if __name__ == "__main__":
     # plt.legend()
     # plt.show()
     # compare_all(n_task_params=task_params)
-    compare_convergence()
+    # compare_convergence()
 
