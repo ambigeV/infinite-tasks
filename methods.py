@@ -55,7 +55,7 @@ method_name_list = ["20_50_ind_gp",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "nonlinear_sphere_high"
+problem_name = "super_nonlinear_sphere_high"
 # problem_name = "linear_ackley"
 dim_size = 4
 task_params = 5 # Default value should be 2
@@ -102,9 +102,15 @@ def configure_method(method_name):
     params["if_ec"] = False
     params["mode"] = None
     params["if_pool"] = False
+    params["if_lbfgs"] = False
     params["method_name"] = method_name
 
     if method_name == "pool_gp":
+        params["if_pool"] = True
+        params["mode"] = 1
+    
+    if method_name == "pool_lbfgs_gp":
+        params["if_lbfgs"] = True
         params["if_pool"] = True
         params["mode"] = 1
 
@@ -255,6 +261,7 @@ def solver(problem_params, method_params, trial):
     if_active_gradient = method_params["if_active_gradient"]
     if_ec = method_params["if_ec"]
     method_mode = method_params["mode"]
+    if_lbfgs = method_params["if_lbfgs"]
 
     # Fetch problem parameters
     ind_size = problem_params["ind_size"]
@@ -863,11 +870,17 @@ def solver(problem_params, method_params, trial):
 
                 inverse_likelihood_list_prepare.append(inverse_likelihood)
                 inverse_model_list_prepare.append(inverse_model)
-
-            inverse_model_list = ModelList(inverse_model_list_prepare,
-                                           inverse_likelihood_list_prepare,
-                                           train_iter * 3)
-            inverse_model_list.train()
+            
+            if if_lbfgs:
+                inverse_model_list = ModelList(inverse_model_list_prepare,
+                                               inverse_likelihood_list_prepare,
+                                               100)
+                inverse_model_list.high_train()
+            else:
+                inverse_model_list = ModelList(inverse_model_list_prepare,
+                                               inverse_likelihood_list_prepare,
+                                               train_iter * 3)
+                inverse_model_list.train()
             ####################################################################################
             # Fetch new task
             ec_gen = 100
@@ -1644,7 +1657,7 @@ def fetch_task_lhs(task_param=2, task_size=10):
 my_trials = 5
 
 if __name__ == "__main__":
-    main_solver(trials=my_trials, method_name="pool_gp")
+    main_solver(trials=my_trials, method_name="pool_lbfgs_gp")
     # main_solver(trials=my_trials, method_name="ind_gp")
     # main_solver(trials=my_trials, method_name="fixed_context_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
