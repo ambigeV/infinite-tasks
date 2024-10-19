@@ -99,6 +99,10 @@ def get_problem(name, problem_params=None, task_params=2):
         'linear_rastrigin_10': Rastrigin(n_dim=problem_params, mode="linear", factor=10),
         'perfect_rastrigin_20': Rastrigin(n_dim=problem_params, mode="perfect", factor=20),
         'linear_rastrigin_20': Rastrigin(n_dim=problem_params, mode="linear", factor=20),
+        'nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="nonlinear",
+                                                 task_param=task_params, factor=20),
+        'middle_nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="middle_nonlinear",
+                                                        task_param=task_params, factor=20),
     }
 
     if name not in PROBLEM:
@@ -212,15 +216,18 @@ class Ackley:
 
 
 class Rastrigin:
-    def __init__(self, n_dim=10, mode="perfect", factor=4):
+    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4):
         self.n_dim = n_dim
         self.n_obj = 1
         self.mode = mode
         shift_mat = None
         if self.mode == "perfect":
-            shift_mat = get_constant_mat(self.n_dim)
-        elif self.mode == "linear":
-            shift_mat = get_linear_mat(self.n_dim)
+            shift_mat = get_constant_mat(self.n_dim, task_param)
+        elif self.mode == "linear" or \
+                self.mode == "nonlinear" or \
+                self.mode == "super_nonlinear" or \
+                self.mode == "middle_nonlinear":
+            shift_mat = get_linear_mat(self.n_dim, task_param)
         else:
             pass
         self.shift_mat = shift_mat
@@ -241,6 +248,13 @@ class Rastrigin:
         sol = x[:self.n_dim]
         hook = x[self.n_dim:]
         shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        if self.mode == "nonlinear":
+            shift = nonlinear_map(shift)
+        if self.mode == "middle_nonlinear":
+            shift = middle_nonlinear_map(shift)
+        if self.mode == "super_nonlinear":
+            shift = super_nonlinear_map(shift)
 
         return np.sum(np.power((sol - shift) * self.factor, 2) -
                       10 * np.cos(2 * np.pi * self.factor * (sol - shift)) + 10)
