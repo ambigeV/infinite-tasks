@@ -111,6 +111,18 @@ def get_problem(name, problem_params=None, task_params=2):
                                                    task_param=task_params, factor=600),
         'super_nonlinear_griewank_high': Griewank(n_dim=problem_params, mode="super_nonlinear",
                                                   task_param=task_params, factor=600),
+        'nonlinear_rosenbrock_high': Rosenbrock(n_dim=problem_params, mode="nonlinear",
+                                                task_param=task_params, factor=5),
+        'middle_nonlinear_rosenbrock_high': Rosenbrock(n_dim=problem_params, mode="middle_nonlinear",
+                                                       task_param=task_params, factor=5),
+        'super_nonlinear_rosenbrock_high': Rosenbrock(n_dim=problem_params, mode="super_nonlinear",
+                                                      task_param=task_params, factor=5),
+        'nonlinear_tang_high': Tang(n_dim=problem_params, mode="nonlinear",
+                                    task_param=task_params, factor=2),
+        'middle_nonlinear_tang_high': Tang(n_dim=problem_params, mode="middle_nonlinear",
+                                           task_param=task_params, factor=2),
+        'super_nonlinear_tang_high': Tang(n_dim=problem_params, mode="super_nonlinear",
+                                          task_param=task_params, factor=2),
     }
 
     if name not in PROBLEM:
@@ -311,6 +323,99 @@ class Rastrigin:
 
         return np.sum(np.power((sol - shift) * self.factor, 2) -
                       10 * np.cos(2 * np.pi * self.factor * (sol - shift)) + 10)
+
+
+class Rosenbrock:
+    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4):
+        self.n_dim = n_dim
+        self.n_obj = 1
+        self.mode = mode
+        shift_mat = None
+        if self.mode == "perfect":
+            shift_mat = get_constant_mat(self.n_dim, task_param)
+        elif self.mode == "linear" or \
+                self.mode == "nonlinear" or \
+                self.mode == "super_nonlinear" or \
+                self.mode == "middle_nonlinear":
+            shift_mat = get_linear_mat(self.n_dim, task_param)
+        else:
+            pass
+        self.shift_mat = shift_mat
+        self.factor = factor
+
+    def divergence(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        return np.sum(np.power(sol * self.factor - shift * self.factor, 2))
+
+    def evaluate(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        if self.mode == "nonlinear":
+            shift = nonlinear_map(shift)
+        if self.mode == "middle_nonlinear":
+            shift = middle_nonlinear_map(shift)
+        if self.mode == "super_nonlinear":
+            shift = super_nonlinear_map(shift)
+
+        new_sol = 1 + self.factor * (sol - shift)
+
+        return np.sum(100 * np.power(np.power(new_sol[:self.n_dim-1], 2) - new_sol[1:], 2) +
+                      np.power(new_sol[:self.n_dim-1] - 1, 2))
+
+
+class Tang:
+    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4):
+        self.n_dim = n_dim
+        self.n_obj = 1
+        self.mode = mode
+        shift_mat = None
+        if self.mode == "perfect":
+            shift_mat = get_constant_mat(self.n_dim, task_param)
+        elif self.mode == "linear" or \
+                self.mode == "nonlinear" or \
+                self.mode == "super_nonlinear" or \
+                self.mode == "middle_nonlinear":
+            shift_mat = get_linear_mat(self.n_dim, task_param)
+        else:
+            pass
+        self.shift_mat = shift_mat
+        self.factor = factor
+
+    def divergence(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        return np.sum(np.power(sol * self.factor - shift * self.factor, 2))
+
+    def evaluate(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        if self.mode == "nonlinear":
+            shift = nonlinear_map(shift)
+        if self.mode == "middle_nonlinear":
+            shift = middle_nonlinear_map(shift)
+        if self.mode == "super_nonlinear":
+            shift = super_nonlinear_map(shift)
+
+        new_sol = self.factor * (sol - shift) - 2.903534
+
+        return 0.5 * np.sum(np.power(new_sol, 4) - 16 * np.power(new_sol, 2) + 5 * new_sol)
 
 
 class ActualArm:
