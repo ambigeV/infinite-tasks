@@ -1657,9 +1657,15 @@ def fetch_task_lhs(task_param=2, task_size=10):
 my_trials = 5
 
 if __name__ == "__main__":
-    main_solver(trials=my_trials, method_name="ind_gp")
-    main_solver(trials=my_trials, method_name="fixed_context_gp")
-    main_solver(trials=my_trials, method_name="pool_gp")
+    problem_name_list = ["tang", "rosenbrock", "griewank"]
+    problem_name_template = "nonlinear"
+    for cur_name in problem_name_list:
+        problem_name = "{}_{}_high".format(problem_name_template, cur_name)
+        direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+        print(direct_name)
+        main_solver(trials=my_trials, method_name="fixed_context_gp")
+        main_solver(trials=my_trials, method_name="pool_gp")
+        main_solver(trials=my_trials, method_name="ind_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_hessian_context_gp_plain")
