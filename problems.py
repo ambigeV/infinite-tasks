@@ -103,6 +103,8 @@ def get_problem(name, problem_params=None, task_params=2):
                                                  task_param=task_params, factor=20),
         'middle_nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="middle_nonlinear",
                                                         task_param=task_params, factor=20),
+        'super_nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="super_nonlinear",
+                                                        task_param=task_params, factor=20),
     }
 
     if name not in PROBLEM:

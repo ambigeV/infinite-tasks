@@ -55,7 +55,7 @@ method_name_list = ["20_50_ind_gp",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "super_nonlinear_sphere_high"
+problem_name = "super_nonlinear_rastrigin_20_high"
 # problem_name = "linear_ackley"
 dim_size = 4
 task_params = 5 # Default value should be 2
@@ -1657,9 +1657,9 @@ def fetch_task_lhs(task_param=2, task_size=10):
 my_trials = 5
 
 if __name__ == "__main__":
-    main_solver(trials=my_trials, method_name="pool_lbfgs_gp")
-    # main_solver(trials=my_trials, method_name="ind_gp")
-    # main_solver(trials=my_trials, method_name="fixed_context_gp")
+    main_solver(trials=my_trials, method_name="ind_gp")
+    main_solver(trials=my_trials, method_name="fixed_context_gp")
+    main_solver(trials=my_trials, method_name="pool_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_hessian_context_gp_plain")
