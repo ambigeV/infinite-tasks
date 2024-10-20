@@ -104,7 +104,13 @@ def get_problem(name, problem_params=None, task_params=2):
         'middle_nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="middle_nonlinear",
                                                         task_param=task_params, factor=20),
         'super_nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="super_nonlinear",
-                                                        task_param=task_params, factor=20),
+                                                       task_param=task_params, factor=20),
+        'nonlinear_griewank_high': Griewank(n_dim=problem_params, mode="nonlinear",
+                                            task_param=task_params, factor=600),
+        'middle_nonlinear_griewank_high': Griewank(n_dim=problem_params, mode="middle_nonlinear",
+                                                   task_param=task_params, factor=600),
+        'super_nonlinear_griewank_high': Griewank(n_dim=problem_params, mode="super_nonlinear",
+                                                  task_param=task_params, factor=600),
     }
 
     if name not in PROBLEM:
@@ -215,6 +221,51 @@ class Ackley:
 
         return -20 * np.exp(-0.2 * np.sqrt(np.mean(np.power(sol * self.factor - shift * self.factor, 2)))) - \
             np.exp(np.mean(np.cos(2 * np.pi * self.factor * (sol - shift)))) + 20 + np.exp(1)
+
+
+class Griewank:
+    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4):
+        self.n_dim = n_dim
+        self.n_obj = 1
+        self.mode = mode
+        shift_mat = None
+        if self.mode == "perfect":
+            shift_mat = get_constant_mat(self.n_dim, task_param)
+        elif self.mode == "linear" or \
+                self.mode == "nonlinear" or \
+                self.mode == "super_nonlinear" or \
+                self.mode == "middle_nonlinear":
+            shift_mat = get_linear_mat(self.n_dim, task_param)
+        else:
+            pass
+        self.shift_mat = shift_mat
+        self.factor = factor
+
+    def divergence(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+
+        return np.sum(np.power(sol * self.factor - shift * self.factor, 2))
+
+    def evaluate(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        sol = x[:self.n_dim]
+        hook = x[self.n_dim:]
+        shift = np.squeeze(np.matmul(self.shift_mat, np.expand_dims(hook, axis=1)), axis=1)
+        if self.mode == "nonlinear":
+            shift = nonlinear_map(shift)
+        if self.mode == "middle_nonlinear":
+            shift = middle_nonlinear_map(shift)
+        if self.mode == "super_nonlinear":
+            shift = super_nonlinear_map(shift)
+
+        return np.sum(np.power(sol * self.factor - shift * self.factor, 2) / 4000) - \
+            np.prod(np.cos(sol * self.factor - shift * self.factor / np.sqrt(np.linspace(1, self.n_dim, self.n_dim)))) \
+            + 1
 
 
 class Rastrigin:
