@@ -74,6 +74,11 @@ def get_problem(name, problem_params=None, task_params=2):
     # key: 'nonlinear_rastrigin'
 
     PROBLEM = {
+        're21_1': RE21_1(),
+        're21_2': RE21_2(),
+        're25_1': RE25_1(),
+        'recontrol': ReControl(n_dim=3),
+        'recontrol_env': ReControlEnv(n_dim=3),
         'sep_arm': ActualArm(n_dim=problem_params),
         'perfect_sphere': Sphere(n_dim=problem_params, mode="perfect"),
         'linear_sphere': Sphere(n_dim=problem_params, mode="linear"),
@@ -418,6 +423,350 @@ class Tang:
         return 0.5 * np.sum(np.power(new_sol, 4) - 16 * np.power(new_sol, 2) + 5 * new_sol)
 
 
+class ReControl:
+    def __init__(self, n_dim=3):
+        self.m_2 = 0
+        self.m_2_min = 8000
+        self.m_2_max = 12000
+        self.m_1 = 42000 * torch.ones(1)
+        self.v = 0.7 * torch.ones(1)
+        self.n_dim = n_dim
+        self.g = 9.8
+        self.l = None
+        self.l_min = 5
+        self.l_max = 8
+        self.W_coef_min = 0.005
+        self.W_coef_max = 0.015
+        self.W_coef = None
+        self.W = 0.01 * self.g * (self.m_1 + self.m_2)
+        self.w = 1e6 * torch.ones(1)
+        self.delta = 0.01 * torch.ones(1)
+        self.F_min = 0 * torch.ones(1)
+        self.F_max = 24107 * torch.ones(1)
+        self.omega = None
+        self.omega_0 = None
+
+    def compute_TE(self, t):
+
+        TE_2 = (self.m_1 * self.v * torch.pow(self.omega, 3) - self.omega * torch.square(self.omega_0) *
+         (self.F_min * t[1] + self.F_max * (t[0] + t[2]) - torch.sum(t[:self.n_dim]) * self.W) +
+         torch.square(self.omega_0) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega)) +
+         (self.F_max - self.W) * torch.sin(torch.sum(t[:self.n_dim]) * self.omega)))
+
+        TE = (self.m_2) / (2 * torch.square(self.m_1)*torch.pow(self.omega, 6)) * \
+             (torch.square(self.omega) * torch.pow(self.omega_0, 4) *
+              (self.F_max - self.W - (self.F_max - self.F_min) *
+               (torch.cos(self.omega * t[2]) - torch.cos((t[1] + t[2])*self.omega))) +
+              (self.W - self.F_max) * torch.cos(torch.square(torch.sum(t[:self.n_dim]) * self.omega)) +
+              torch.pow(self.omega, 4) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega))) +
+              (self.F_max - self.W) * torch.sin(torch.square(torch.sum(t[:self.n_dim]) * self.omega)) + torch.square(TE_2)
+              )
+
+        if TE >= self.delta:
+            return self.w * TE
+        else:
+            return 0
+
+    def compute_TE_new(self, t):
+
+        TE_2 = (self.m_1 * self.v * torch.pow(self.omega, 3) - self.omega * torch.square(self.omega_0) *
+         (self.F_min * t[1] + self.F_max * (t[0] + t[2]) - torch.sum(t[:self.n_dim]) * self.W) +
+         torch.square(self.omega_0) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega)) +
+         (self.F_max - self.W) * torch.sin(torch.sum(t[:self.n_dim]) * self.omega)))
+
+        TE = (self.m_2) / (2 * torch.square(self.m_1)*torch.pow(self.omega, 6)) * \
+             (torch.square(self.omega) * torch.pow(self.omega_0, 4) *
+              (self.F_max - self.W - (self.F_max - self.F_min) *
+               (torch.cos(self.omega * t[2]) - torch.cos((t[1] + t[2])*self.omega))) +
+              (self.W - self.F_max) * torch.square(torch.cos(torch.sum(t[:self.n_dim]) * self.omega)) +
+              torch.pow(self.omega, 4) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega))) +
+              (self.F_max - self.W) * torch.square(torch.sin(torch.sum(t[:self.n_dim]) * self.omega)) + torch.square(TE_2)
+              )
+
+        if TE >= self.delta:
+            return self.w * TE
+        else:
+            return 0
+
+    def evaluate(self, x):
+        t = x.clone()
+        t[:self.n_dim] = t[:self.n_dim] * 3
+
+        # Re-define some of the task parameters
+        # Re-define m_2
+        self.m_2 = self.m_2_min + (self.m_2_max - self.m_2_min) * t[self.n_dim]
+        # Re-define l
+        self.l = self.l_min + (self.l_max - self.l_min) * t[self.n_dim + 1]
+        # Re-define W_coef and W
+        self.W_coef = self.W_coef_min + (self.W_coef_max - self.W_coef_min) * t[self.n_dim + 2]
+        self.W = self.W_coef * self.g * (self.m_1 + self.m_2)
+
+        # Compute Omega
+        omega = torch.sqrt(((self.m_1 + self.m_2)/self.m_1) * self.g/self.l)
+        self.omega = omega
+        omega_0 = torch.sqrt(self.g/self.l)
+        self.omega_0 = omega_0
+
+        E = self.compute_TE(t)
+
+        return 1e-6 * (((2*E)/(self.m_2*torch.square(self.v))) +
+                       (torch.sum(t[:self.n_dim]*self.omega/(2*torch.pi))) - 1e5).item()
+
+
+class ReControlEnv:
+    def __init__(self, n_dim=3):
+        self.m_2 = 0
+        self.m_2_min = 8000
+        self.m_2_max = 12000
+        self.m_1 = 42000 * torch.ones(1)
+        self.v = 0.7 * torch.ones(1)
+        self.n_dim = n_dim
+        self.g = 9.8
+        self.l = None
+        self.l_min = 5
+        self.l_max = 8
+        self.W_coef_min = 0.005
+        self.W_coef_max = 0.015
+        self.W_coef = None
+        self.W = 0.01 * self.g * (self.m_1 + self.m_2)
+        self.w = 1e6 * torch.ones(1)
+        self.delta = 0.01 * torch.ones(1)
+        self.F_min = 0 * torch.ones(1)
+        self.F_max = 24107 * torch.ones(1)
+        self.omega = None
+        self.omega_0 = None
+
+    def compute_TE(self, t):
+
+        TE_2 = (self.m_1 * self.v * torch.pow(self.omega, 3) - self.omega * torch.square(self.omega_0) *
+         (self.F_min * t[1] + self.F_max * (t[0] + t[2]) - torch.sum(t[:self.n_dim]) * self.W) +
+         torch.square(self.omega_0) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega)) +
+         (self.F_max - self.W) * torch.sin(torch.sum(t[:self.n_dim]) * self.omega)))
+
+        TE = (self.m_2) / (2 * torch.square(self.m_1)*torch.pow(self.omega, 6)) * \
+             (torch.square(self.omega) * torch.pow(self.omega_0, 4) *
+              (self.F_max - self.W - (self.F_max - self.F_min) *
+               (torch.cos(self.omega * t[2]) - torch.cos((t[1] + t[2])*self.omega))) +
+              (self.W - self.F_max) * torch.cos(torch.square(torch.sum(t[:self.n_dim]) * self.omega)) +
+              torch.pow(self.omega, 4) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega))) +
+              (self.F_max - self.W) * torch.sin(torch.square(torch.sum(t[:self.n_dim]) * self.omega)) + torch.square(TE_2)
+              )
+
+        if TE >= self.delta:
+            return self.w * TE
+        else:
+            return 0
+
+    def compute_TE_new(self, t):
+
+        TE_2 = (self.m_1 * self.v * torch.pow(self.omega, 3) - self.omega * torch.square(self.omega_0) *
+         (self.F_min * t[1] + self.F_max * (t[0] + t[2]) - torch.sum(t[:self.n_dim]) * self.W) +
+         torch.square(self.omega_0) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega)) +
+         (self.F_max - self.W) * torch.sin(torch.sum(t[:self.n_dim]) * self.omega)))
+
+        TE = (self.m_2) / (2 * torch.square(self.m_1)*torch.pow(self.omega, 6)) * \
+             (torch.square(self.omega) * torch.pow(self.omega_0, 4) *
+              (self.F_max - self.W - (self.F_max - self.F_min) *
+               (torch.cos(self.omega * t[2]) - torch.cos((t[1] + t[2])*self.omega))) +
+              (self.W - self.F_max) * torch.square(torch.cos(torch.sum(t[:self.n_dim]) * self.omega)) +
+              torch.pow(self.omega, 4) * ((self.F_max - self.F_min)*(torch.sin(t[2]*self.omega) - torch.sin((t[1] + t[2])*self.omega))) +
+              (self.F_max - self.W) * torch.square(torch.sin(torch.sum(t[:self.n_dim]) * self.omega)) + torch.square(TE_2)
+              )
+
+        if TE >= self.delta:
+            return self.w * TE
+        else:
+            return 0
+
+    def evaluate(self, x):
+        t = x.clone()
+        t[:self.n_dim] = t[:self.n_dim] * 2
+        t[:self.n_dim] = t[:self.n_dim] + t[self.n_dim:]
+
+        # Re-define some of the task parameters
+        # Re-define m_2
+        self.m_2 = self.m_2_min + (self.m_2_max - self.m_2_min) * 0.5
+        # Re-define l
+        self.l = self.l_min + (self.l_max - self.l_min) * 0.5
+        # Re-define W_coef and W
+        self.W_coef = self.W_coef_min + (self.W_coef_max - self.W_coef_min) * 0.5
+        self.W = self.W_coef * self.g * (self.m_1 + self.m_2)
+
+        # Compute Omega
+        omega = torch.sqrt(((self.m_1 + self.m_2)/self.m_1) * self.g/self.l)
+        self.omega = omega
+        omega_0 = torch.sqrt(self.g/self.l)
+        self.omega_0 = omega_0
+
+        E = self.compute_TE(t)
+
+        return 1e-6 * (((2*E)/(self.m_2*torch.square(self.v))) +
+                       (torch.sum(t[:self.n_dim]*self.omega/(2*torch.pi))) - 1e5).item()
+
+
+class RE21_1():
+    def __init__(self, n_dim=4, F=10.0, sigma=10.0, L=200.0, E=2e5):
+        tmp_val = F / sigma
+
+        self.F = F
+        self.E = E
+        self.L = L
+
+        self.current_name = "real_one"
+        self.n_dim = n_dim
+        self.n_obj = 2
+        self.lbound = torch.tensor([tmp_val, np.sqrt(2.0) * tmp_val, np.sqrt(2.0) * tmp_val, tmp_val]).float()
+        self.ubound = torch.ones(n_dim).float() * 3 * tmp_val
+        self.nadir_point = [2886.3695604236013, 0.039999999999998245]
+        self.factor = 0.90
+
+    def evaluate(self, y):
+        F = self.F
+        E = self.E
+        L = self.L
+
+        x = y.clone()
+
+        x[self.n_dim:] = x[self.n_dim:] * (self.ubound - self.lbound) * (1 - self.factor)
+        x[:self.n_dim] = x[:self.n_dim] * (self.ubound - self.lbound) * self.factor + self.lbound
+        x[:self.n_dim] = x[:self.n_dim] + x[self.n_dim:]
+
+        f1 = L * ((2 * x[0]) + np.sqrt(2.0) * x[1] + torch.sqrt(x[2]) + x[3])
+        f1_max = L * ((2 * self.ubound[0]) + np.sqrt(2.0) * self.ubound[1] +
+                      torch.sqrt(self.ubound[2]) + self.ubound[3])
+
+        f2 = ((F * L) / E) * (
+                    (2.0 / x[0]) + (2.0 * np.sqrt(2.0) / x[1]) - (2.0 * np.sqrt(2.0) / x[2]) + (2.0 / x[3]))
+        f2_max = ((F * L) / E) * (
+                    (2.0 / self.lbound[0]) + (2.0 * np.sqrt(2.0) / self.lbound[1]) -
+                    (2.0 * np.sqrt(2.0) / self.ubound[2]) + (2.0 / self.lbound[3]))
+
+        f1 = f1 / f1_max
+        # f2 = f2 / f2_max
+        # f_tot = (1.5*f1 + 0.5*f2) / 2
+        # objs = torch.stack([f1, f2]).T
+        #
+        # return objs
+        return f1.item()
+
+
+class RE21_2():
+    def __init__(self, n_dim=4, F=10.0, sigma=10.0, L=200.0, E=2e5):
+        tmp_val = F / sigma
+
+        self.F = F
+        self.E = E
+        self.L = L
+
+        self.current_name = "real_one"
+        self.n_dim = n_dim
+        self.n_obj = 2
+        self.lbound = torch.tensor([tmp_val, np.sqrt(2.0) * tmp_val, np.sqrt(2.0) * tmp_val, tmp_val]).float()
+        self.ubound = torch.ones(n_dim).float() * 3 * tmp_val
+        self.nadir_point = [2886.3695604236013, 0.039999999999998245]
+        self.factor = 0.90
+
+    def evaluate(self, y):
+        F = self.F
+        E = self.E
+        L = self.L
+
+        x = y.clone()
+
+        x[self.n_dim:] = x[self.n_dim:] * (self.ubound - self.lbound) * (1 - self.factor)
+        x[:self.n_dim] = x[:self.n_dim] * (self.ubound - self.lbound) * self.factor + self.lbound
+        x[:self.n_dim] = x[:self.n_dim] + x[self.n_dim:]
+
+        # f1 = L * ((2 * x[0]) + np.sqrt(2.0) * x[1] + torch.sqrt(x[2]) + x[3])
+        # f1_max = L * ((2 * self.ubound[0]) + np.sqrt(2.0) * self.ubound[1] +
+        #               torch.sqrt(self.ubound[2]) + self.ubound[3])
+
+        f2 = ((F * L) / E) * (
+                    (2.0 / x[0]) + (2.0 * np.sqrt(2.0) / x[1]) - (2.0 * np.sqrt(2.0) / x[2]) + (2.0 / x[3]))
+        f2_max = ((F * L) / E) * (
+                    (2.0 / self.lbound[0]) + (2.0 * np.sqrt(2.0) / self.lbound[1]) -
+                    (2.0 * np.sqrt(2.0) / self.ubound[2]) + (2.0 / self.lbound[3]))
+
+        # f1 = f1 / f1_max
+        f2 = f2 / f2_max
+
+        # objs = torch.stack([f1, f2]).T
+        #
+        # return objs
+        return f2.item()
+
+
+class RE25_1():
+    def __init__(self, n_dim=3, F_max=1000, l_max=14, sigma_pm=6):
+        self.F_max = F_max
+        self.l_max = l_max
+        self.sigma_pm = sigma_pm
+
+        self.current_name = "real_three"
+
+        self.n_dim = n_dim
+        self.n_obj = 2
+        self.lbound = torch.tensor([1, 0.6, 0.009]).float()
+        self.ubound = torch.tensor([70, 30, 0.5]).float()
+        self.nadir_point = [5852.05896876, 1288669.78054]
+        self.factor = 0.90
+
+    def evaluate(self, y):
+
+        x = y.clone()
+
+        x[self.n_dim:] = x[self.n_dim:] * (self.ubound - self.lbound) * (1 - self.factor)
+        x[:self.n_dim] = x[:self.n_dim] * (self.ubound - self.lbound) * self.factor + self.lbound
+        x[:self.n_dim] = x[:self.n_dim] + x[self.n_dim:]
+
+        x1 = torch.round(x[0])
+        x2 = x[1]
+        x3 = x[2]
+
+        # First original objective function
+        # f1 = (0.6224 * x1 * x3 * x4) + (1.7781 * x2 * x3 * x3) + (3.1661 * x1 * x1 * x4) + (19.84 * x1 * x1 * x3)
+        f1 = (torch.pi * torch.pi * x2 * x3 * x3 * (x1 + 2)) / \
+             (torch.pi * torch.pi * self.ubound[1] * self.ubound[2] * self.ubound[2] * (self.ubound[0] + 2))
+        f1 = f1.float()
+
+        # Constraint variables
+        F_max = self.F_max
+        l_max = self.l_max
+        sigma_pm = self.sigma_pm
+
+        S = 1.89 * 1e5
+        C_f = ((4 * (x2 / x3) - 1) / (4 * (x2 / x3) - 4)) + (0.615 * x3) / x2
+        G = 11.5 * 1e6
+        K = (G * x3 * x3 * x3 * x3) / (8 * x1 * x2 * x2 * x2)
+        F_p = 300
+        sigma_p = F_p / K
+        l_f = (F_max / K) + (1.05 * (x1 + 2) * x3)
+        sigma_w = 1.25
+
+        # Original constraint functions
+        g1 = S - (8 * C_f * F_max * x2) / (torch.pi * x3 * x3 * x3)
+        g2 = l_max - l_f
+        g3 = x2 / x3 - 3
+        g4 = sigma_pm - sigma_p
+        g5 = - sigma_p - (F_max - F_p) / K - 1.05 * (x1 + 2) * x3 + l_f
+        g6 = - sigma_w + (F_max - F_p) / K
+        g = torch.stack([g1, g2, g3, g4, g5, g6])
+        if x.device.type == 'cuda':
+            z = torch.zeros(g.shape).cuda().to(torch.float64)
+        else:
+            z = torch.zeros(g.shape).to(torch.float64)
+        g = torch.where(g < 0, -g, z)
+
+        f2 = torch.sum(g, axis=0).to(torch.float64)
+        f2 = f2 / 1e10
+
+        f_tot = f2
+        #
+        # objs = torch.stack([f1, f2]).T
+
+        return f_tot.item()
+
+
 class ActualArm:
     def __init__(self, n_dim=10):
         self.n_dim = n_dim
@@ -450,5 +799,11 @@ if __name__ == "__main__":
     # en = time.time()
     # print("lasting time is {}s".format(en - st))
 
-    print(get_linear_mat(4, 5))
+    # print(get_linear_mat(4, 5))
+    problem = ReControl
+    solution_vector = []
+    solution_size = 30000
+    solutions = torch.rand(solution_size, 6)
+
+
 

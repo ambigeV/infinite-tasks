@@ -26,8 +26,8 @@ from scipy.stats import qmc
 
 # method_name_list = ["10_50_ind_gp_ard",
 #                     "10_50_fixed_context_gp_ard"]
-method_name_list = ["20_50_ind_gp",
-                    "20_50_fixed_context_gp"]
+method_name_list = ["10_50_ind_gp_hetero",
+                    "10_50_fixed_context_gp_hetero"]
                     # "20_50_context_gp_plain",
                     # "20_50_active_uncertain_context_gp_plain",
                     # "20_50_active_gradient_context_gp_plain"]
@@ -55,12 +55,15 @@ method_name_list = ["20_50_ind_gp",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "super_nonlinear_rastrigin_20_high"
+# problem_name = "super_nonlinear_rastrigin_20_high"
 # problem_name = "linear_ackley"
-dim_size = 4
-task_params = 5 # Default value should be 2
-direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
-# direct_name = "{}_result_{}".format(problem_name, dim_size)
+# problem_name = "re21_1"
+problem_name = "re25_1"
+# problem_name = "re21_2"
+dim_size = 3
+task_params = 3 # Default value should be 2
+# direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+direct_name = "{}_result_{}".format(problem_name, dim_size)
 task_number = 20
 beta_ucb = 50
 # direct_name = "result_physics"
@@ -904,6 +907,7 @@ def solver(problem_params, method_params, trial):
                                   fixed_solution=task_list[i, :],
                                   opt_iter=test_iter,
                                   if_debug=False)
+                ans = torch.clamp(ans, 0, 1)
                 # ans should be in size of [n_dim, ]
                 param = ans.unsqueeze(0)
                 # attach the param and task_params
@@ -1502,12 +1506,12 @@ def compare_all(n_task_params=2, mode="canonical"):
     # test_data
     # test_tot = 10000
     # test_data = torch.rand(test_tot, 2)
-    sample_width = 10
-    test_tot = sample_width ** n_task_params
-    test_data = uniform_sample(sample_width, n_task_params)
-    # sample_width = 100
+    # sample_width = 10
     # test_tot = sample_width ** n_task_params
     # test_data = uniform_sample(sample_width, n_task_params)
+    sample_width = 100
+    test_tot = sample_width ** n_task_params
+    test_data = uniform_sample(sample_width, n_task_params)
     # test_tot = 20
     # test_data = torch.stack(fetch_task_lhs(5, 20))
     # test_data = torch.rand(test_tot, n_task_params)
@@ -1554,8 +1558,8 @@ def compare_all(n_task_params=2, mode="canonical"):
         # plot_details(test_data.numpy(), torch.mean(results_lists, dim=0).numpy(), method_name)
         # plot_tot(results_lists, m_id + 1, method_name_list)
     # plot_box(result_lists, method_name_list)
-    plot_box(result_lists, ["Strategy 1", "Strategy 2", "Strategy 3", "Strategy 4", "Strategy 5"])
-    # plot_box(result_lists, ["Strategy 1", "Strategy 2"])
+    # plot_box(result_lists, ["Strategy 1", "Strategy 2", "Strategy 3", "Strategy 4", "Strategy 5"])
+    plot_box(result_lists, ["Strategy 1", "Strategy 2"])
     plt.show()
     while True:
         x_ind = int(input())
@@ -1576,7 +1580,7 @@ def compare_convergence():
 
     # method_name = "context_gp"
     # problem_name = "sep_arm"
-    trial_number_tot = 9
+    trial_number_tot = 10
 
     result_lists = []
     convergence_lists = []
@@ -1657,15 +1661,18 @@ def fetch_task_lhs(task_param=2, task_size=10):
 my_trials = 5
 
 if __name__ == "__main__":
-    problem_name_list = ["tang", "rosenbrock", "griewank"]
-    problem_name_template = "nonlinear"
-    for cur_name in problem_name_list:
-        problem_name = "{}_{}_high".format(problem_name_template, cur_name)
-        direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
-        print(direct_name)
-        main_solver(trials=my_trials, method_name="fixed_context_gp")
-        main_solver(trials=my_trials, method_name="pool_gp")
-        main_solver(trials=my_trials, method_name="ind_gp")
+    # problem_name_list = ["tang", "rosenbrock", "griewank"]
+    # problem_name_template = "nonlinear"
+    # for cur_name in problem_name_list:
+    #     problem_name = "{}_{}_high".format(problem_name_template, cur_name)
+    #     direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+    #     print(direct_name)
+    #     main_solver(trials=my_trials, method_name="fixed_context_gp")
+    #     main_solver(trials=my_trials, method_name="pool_gp")
+    #     main_solver(trials=my_trials, method_name="ind_gp")
+    main_solver(trials=my_trials, method_name="fixed_context_gp")
+    # main_solver(trials=my_trials, method_name="pool_gp")
+    # main_solver(trials=my_trials, method_name="ind_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_hessian_context_gp_plain")

@@ -346,6 +346,7 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
         else:
             sorted_outputs, ind = torch.sort(outputs)
             ans = solutions[ind, :][0].detach()
+            ans.clamp_(0, 1)
             # if if_debug:
             #     print("Best ans: {}, Best output: {}".format(ans.detach(), sorted_outputs.detach()))
             # print(outputs.detach())
