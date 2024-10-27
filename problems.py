@@ -77,6 +77,7 @@ def get_problem(name, problem_params=None, task_params=2):
         're21_1': RE21_1(),
         're21_2': RE21_2(),
         're25_1': RE25_1(),
+        'truss' : Truss(n_dim=3),
         'recontrol': ReControl(n_dim=3),
         'recontrol_env': ReControlEnv(n_dim=3),
         'sep_arm': ActualArm(n_dim=problem_params),
@@ -421,6 +422,32 @@ class Tang:
         new_sol = self.factor * (sol - shift) - 2.903534
 
         return 0.5 * np.sum(np.power(new_sol, 4) - 16 * np.power(new_sol, 2) + 5 * new_sol)
+
+
+class Truss:
+    def __init__(self, n_dim=3):
+        self.n_dim = n_dim
+        self.sol_low = torch.Tensor([1e-5, 1e-5, 1])
+        self.sol_high = torch.Tensor([100, 100, 3])
+        self.sol_delta_low = torch.ones(3) * -0.05
+        self.sol_delta_high = torch.ones(3) * 0.05
+
+    def evaluate(self, t):
+        x = t.clone()
+
+        # Model the noise
+        x[:self.n_dim] = x[:self.n_dim] * (self.sol_delta_high - self.sol_delta_low) + self.sol_delta_low
+        x[:self.n_dim] = x[:self.n_dim] + x[self.n_dim:]
+        x[:self.n_dim] = torch.clamp(x[:self.n_dim], 0, 1)
+        x[:self.n_dim] = x[:self.n_dim] * (self.sol_high - self.sol_low) + self.sol_low
+        # Compute f1
+        f1 = x[0] * torch.sqrt(torch.square(x[0]) + 16) + x[1] * torch.sqrt(1 + torch.square(x[2]))
+        # Compute f2
+        f2 = (20 * torch.sqrt(16 + torch.square(x[2]))) / (x[0] * x[2])
+        # Compute f3
+        f3 = (80 * torch.sqrt(1 + torch.square(x[2]))) / (x[1] * x[2])
+
+        return ((f1 + f2 - 1e5)/1e6).item()
 
 
 class ReControl:
