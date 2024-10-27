@@ -441,13 +441,16 @@ class Truss:
         x[:self.n_dim] = torch.clamp(x[:self.n_dim], 0, 1)
         x[:self.n_dim] = x[:self.n_dim] * (self.sol_high - self.sol_low) + self.sol_low
         # Compute f1
-        f1 = x[0] * torch.sqrt(torch.square(x[0]) + 16) + x[1] * torch.sqrt(1 + torch.square(x[2]))
+        f1 = x[0] * torch.sqrt(torch.square(x[0]) + 16) + x[1] * torch.sqrt(1 + torch.square(x[2])) * 10
+        # f1 = torch.where(f1 < 1, f1, 1)
         # Compute f2
-        f2 = (20 * torch.sqrt(16 + torch.square(x[2]))) / (x[0] * x[2])
+        f2 = (20 * torch.sqrt(16 + torch.square(x[2]))) / (x[0] * x[2]) * 1e-5
+        # f2 = torch.where(f2 < 1, f2, 1)
         # Compute f3
-        f3 = (80 * torch.sqrt(1 + torch.square(x[2]))) / (x[1] * x[2])
+        # f3 = (80 * torch.sqrt(1 + torch.square(x[2]))) / (x[1] * x[2]) * 1e-5
+        # f3 = torch.where(f3 < 1, f3, 1)
 
-        return ((f1 + f2 - 1e5)/1e6).item()
+        return (f1 + f2).item() - 1
 
 
 class ReControl:
