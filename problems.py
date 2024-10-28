@@ -546,17 +546,17 @@ class ReControl:
 class ReControlEnv:
     def __init__(self, n_dim=3):
         self.m_2 = 0
-        self.m_2_min = 8000
-        self.m_2_max = 12000
+        self.m_2_min = 8000 * torch.ones(1)
+        self.m_2_max = 12000 * torch.ones(1)
         self.m_1 = 42000 * torch.ones(1)
         self.v = 0.7 * torch.ones(1)
         self.n_dim = n_dim
-        self.g = 9.8
+        self.g = 9.8 * torch.ones(1)
         self.l = None
-        self.l_min = 5
-        self.l_max = 8
-        self.W_coef_min = 0.005
-        self.W_coef_max = 0.015
+        self.l_min = 5 * torch.ones(1)
+        self.l_max = 8 * torch.ones(1)
+        self.W_coef_min = 0.005 * torch.ones(1)
+        self.W_coef_max = 0.015 * torch.ones(1)
         self.W_coef = None
         self.W = 0.01 * self.g * (self.m_1 + self.m_2)
         self.w = 1e6 * torch.ones(1)
