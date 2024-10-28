@@ -257,6 +257,9 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
     # mode 3:
     # solutions are the second part and concatenate  the fixed solution before solutions
     # evaluate([fixed_solution, solutions])
+    # mode 4:
+    # solutions are all you got and fixed solution should be None but this turned to maximization
+    # evaluate([solutions])
 
     # Initiate a set of starting points in size (num_start)
     obj_size = len(model_list)
@@ -294,14 +297,20 @@ def next_sample(model_list, likelihood_list, sol_dim, weights, mode, fixed_solut
                     print("mean_values: {}, std:values {}".format(mean_values.detach(),
                                                                   std_values.detach()))
 
-
-
             elif mode == 3:
                 # fixed_solution.requires_grad = True
                 mean_values, std_values = \
                     evaluation(model_list[i],
                                likelihood_list[i],
                                torch.cat([fixed_solution.unsqueeze(0).repeat(num_restart, 1), solutions], dim=1))
+
+            elif mode == 4:
+                mean_values, std_values = evaluation(model_list[i], likelihood_list[i], solutions)
+                mean_values = -mean_values
+                if if_debug:
+                    print("mean_values: {}, std:values {}".format(mean_values.detach(),
+                                                                  std_values.detach()))
+
             else:
                 assert 1 == 2
             means_list.append(mean_values.unsqueeze(1))
