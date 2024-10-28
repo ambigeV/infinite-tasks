@@ -77,7 +77,7 @@ def get_problem(name, problem_params=None, task_params=2):
         're21_1': RE21_1(),
         're21_2': RE21_2(),
         're25_1': RE25_1(),
-        'truss' : Truss(n_dim=3),
+        'truss': Truss(n_dim=3),
         'recontrol': ReControl(n_dim=3),
         'recontrol_env': ReControlEnv(n_dim=3),
         'sep_arm': ActualArm(n_dim=problem_params),
@@ -106,15 +106,15 @@ def get_problem(name, problem_params=None, task_params=2):
         'perfect_rastrigin_20': Rastrigin(n_dim=problem_params, mode="perfect", factor=20),
         'linear_rastrigin_20': Rastrigin(n_dim=problem_params, mode="linear", factor=20),
         'nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="nonlinear",
-                                                 task_param=task_params, factor=20),
+                                                 task_param=task_params, factor=20, mean=300, std=200),
         'middle_nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="middle_nonlinear",
-                                                        task_param=task_params, factor=20),
+                                                        task_param=task_params, factor=20, mean=300, std=200),
         'super_nonlinear_rastrigin_20_high': Rastrigin(n_dim=problem_params, mode="super_nonlinear",
                                                        task_param=task_params, factor=20),
         'nonlinear_griewank_high': Griewank(n_dim=problem_params, mode="nonlinear",
-                                            task_param=task_params, factor=600),
+                                            task_param=task_params, factor=600, mean=50, std=30),
         'middle_nonlinear_griewank_high': Griewank(n_dim=problem_params, mode="middle_nonlinear",
-                                                   task_param=task_params, factor=600),
+                                                   task_param=task_params, factor=600, mean=50, std=30),
         'super_nonlinear_griewank_high': Griewank(n_dim=problem_params, mode="super_nonlinear",
                                                   task_param=task_params, factor=600),
         'nonlinear_rosenbrock_high': Rosenbrock(n_dim=problem_params, mode="nonlinear",
@@ -242,7 +242,7 @@ class Ackley:
 
 
 class Griewank:
-    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4):
+    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4, mean=0, std=1):
         self.n_dim = n_dim
         self.n_obj = 1
         self.mode = mode
@@ -258,6 +258,8 @@ class Griewank:
             pass
         self.shift_mat = shift_mat
         self.factor = factor
+        self.mean = mean
+        self.std = std
 
     def divergence(self, x):
         if isinstance(x, torch.Tensor):
@@ -281,13 +283,13 @@ class Griewank:
         if self.mode == "super_nonlinear":
             shift = super_nonlinear_map(shift)
 
-        return np.sum(np.power(sol * self.factor - shift * self.factor, 2) / 4000) - \
+        return (np.sum(np.power(sol * self.factor - shift * self.factor, 2) / 4000) - \
             np.prod(np.cos(sol * self.factor - shift * self.factor / np.sqrt(np.linspace(1, self.n_dim, self.n_dim)))) \
-            + 1
+            + 1 - self.mean)/self.std
 
 
 class Rastrigin:
-    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4):
+    def __init__(self, n_dim=10, mode="perfect", task_param=2, factor=4, mean=0, std=1):
         self.n_dim = n_dim
         self.n_obj = 1
         self.mode = mode
@@ -303,6 +305,8 @@ class Rastrigin:
             pass
         self.shift_mat = shift_mat
         self.factor = factor
+        self.mean = mean
+        self.std = std
 
     def divergence(self, x):
         if isinstance(x, torch.Tensor):
@@ -327,8 +331,8 @@ class Rastrigin:
         if self.mode == "super_nonlinear":
             shift = super_nonlinear_map(shift)
 
-        return np.sum(np.power((sol - shift) * self.factor, 2) -
-                      10 * np.cos(2 * np.pi * self.factor * (sol - shift)) + 10)
+        return (np.sum(np.power((sol - shift) * self.factor, 2) -
+                      10 * np.cos(2 * np.pi * self.factor * (sol - shift)) + 10) - self.mean)/self.std
 
 
 class Rosenbrock:
@@ -450,7 +454,7 @@ class Truss:
         # f3 = (80 * torch.sqrt(1 + torch.square(x[2]))) / (x[1] * x[2]) * 1e-5
         # f3 = torch.where(f3 < 1, f3, 1)
 
-        return (f1 + f2).item() - 1
+        return -((f1 + f2).item() - 1 - 1e3)/1e3
 
 
 class ReControl:
