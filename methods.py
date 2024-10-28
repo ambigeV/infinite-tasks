@@ -106,7 +106,11 @@ def configure_method(method_name):
     params["mode"] = None
     params["if_pool"] = False
     params["if_lbfgs"] = False
+    params["if_zhou"] = False
     params["method_name"] = method_name
+
+    if method_name == "zhou_gp":
+        params["if_zhou"] = True
 
     if method_name == "pool_gp":
         params["if_pool"] = True
@@ -265,6 +269,7 @@ def solver(problem_params, method_params, trial):
     if_ec = method_params["if_ec"]
     method_mode = method_params["mode"]
     if_lbfgs = method_params["if_lbfgs"]
+    if_zhou = method_params["if_zhou"]
 
     # Fetch problem parameters
     ind_size = problem_params["ind_size"]
@@ -366,6 +371,34 @@ def solver(problem_params, method_params, trial):
                         bayesian_best_results[i, :] = bayesian_vector_list[i][j, :]
                         print("Task {} in Iteration {}: Best Obj {}".format(i + 1, j + 1,
                                                                             bayesian_vector_list[i][j, -1]))
+    elif if_zhou:
+        zhou_size = 40
+        init_size = tot_init // zhou_size
+        pool_active = init_size
+        task_list = torch.rand(init_size, n_dim)
+
+        # Initial zhou samples to find the according task parameter
+        for i in range(pool_active):
+            for j in range(zhou_size):
+                # Store solution
+                pool_bayesian_vector[pool_budget, :n_dim] = task_list[i, :]
+                # Store task parameter
+                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = torch.rand(n_task_params).unsqueeze(0)
+                # Store objective value
+                pool_bayesian_vector[pool_budget, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                    problem.evaluate(pool_bayesian_vector[pool_budget, :(n_dim + n_task_params)])
+
+                # Update best results
+                if pool_bayesian_vector[pool_budget, -1] < pool_bayesian_best_results[i, -1]:
+                    pool_bayesian_best_results[i, :] = pool_bayesian_vector[pool_budget, :]
+                    print("Task {} in Iteration {}: Best Obj {}".format(i + 1,
+                                                                        j + 1,
+                                                                        pool_bayesian_vector[pool_budget, -1]))
+
+                # Update budget vector
+                pool_budget_vector[i] += 1
+                # Update total budget
+                pool_budget += 1
     elif if_pool:
         task_list = torch.stack(fetch_task_lhs(n_task_params, ind_size))
         sample_size = tot_init // ind_size
@@ -829,6 +862,64 @@ def solver(problem_params, method_params, trial):
                 if j == tot_size - 1:
                     # move the cut_results to best results
                     bayesian_best_results = torch.cat([bayesian_best_results, bayesian_cut_results])
+    elif if_zhou:
+        start_epoch = tot_init // zhou_size
+        end_epoch = tot_budget // zhou_size
+        for current_sol in range(start_epoch, end_epoch):
+
+            model_list = None
+
+            model_list_prepare = []
+            likelihood_list_prepare = []
+
+            ####################################################################################
+            # Train Forward Model
+            temp_vectors = pool_bayesian_best_results[:pool_active, :]
+
+            likelihood = gpytorch.likelihoods.GaussianLikelihood()
+            model = VanillaGP(temp_vectors[:, :n_dim],
+                              temp_vectors[:, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
+                              likelihood)
+            # Insert it into a list
+            model_list_prepare.append(model)
+            likelihood_list_prepare.append(likelihood)
+
+            # Running the Train Method
+            model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter)
+            model_list.train()
+            ####################################################################################
+            # Fetch new task
+            ans = next_sample([model_list.model.models[0]],
+                              [model_list.likelihood.likelihoods[0]],
+                              n_dim,
+                              torch.tensor([1], dtype=torch.float32).to(device),
+                              mode=4,
+                              fixed_solution=None,
+                              beta=0,
+                              opt_iter=test_iter,
+                              if_debug=False)
+            new_task = ans.clone().unsqueeze(0)
+
+            for i in range(zhou_size):
+                pool_bayesian_vector[pool_budget, :n_dim] = new_task
+                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = \
+                    torch.rand(n_task_params).unsqueeze(0)
+                pool_bayesian_vector[pool_budget, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                    problem.evaluate(pool_bayesian_vector[pool_budget, :(n_dim + n_task_params)])
+
+                if pool_bayesian_vector[pool_budget, -1] < pool_bayesian_best_results[pool_active, -1]:
+                    pool_bayesian_best_results[pool_active, :] = pool_bayesian_vector[pool_budget, :]
+                    print("Task {} in Iteration {}: Best Obj {}".format(pool_active,
+                                                                        pool_budget,
+                                                                        pool_bayesian_vector[pool_budget, -1]))
+
+                # Update budget vector
+                pool_budget_vector[pool_active] += 1
+                # Update total budget
+                pool_budget += 1
+
+            # Increase the pool active
+            pool_active += 1
     elif if_pool:
         while pool_budget < tot_budget:
             inverse_model_list = None
@@ -1229,6 +1320,46 @@ def solver(problem_params, method_params, trial):
         model_records["model_tasks"] = model_list.model.state_dict()
         # Save the likelihood state_dict
         model_records["likelihood_tasks"] = model_list.likelihood.state_dict()
+
+        torch.save(model_records, "./{}/{}_{}_{}_{}.pth".format(direct_name,
+                                                                task_number,
+                                                                beta_ucb,
+                                                                method_name,
+                                                                trial))
+    elif if_zhou:
+        model_records = dict()
+        model_records["ind"] = True
+        model_records["dim"] = n_dim
+        model_records["tasks"] = task_list
+
+        # Build a unified inverse model from theta -> x
+        # model_list = None
+        # model_list_prepare = []
+        # likelihood_list_prepare = []
+
+        # for d in range(n_dim):
+        #     # For each inverse model, we have a dataset for each dimension (D totally)
+        #     # We first build D separate models via model list
+        #     # Then we combine them into a single ModelList class
+        #     likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        #     model = VanillaGP(
+        #         pool_bayesian_best_results[:pool_active, n_dim:(n_dim + n_task_params)],
+        #         pool_bayesian_best_results[:pool_active, d],
+        #         likelihood)
+        #     likelihood_list_prepare.append(likelihood)
+        #     model_list_prepare.append(model)
+        #
+        # # Train the models
+        # # We train each model collaboratively
+        # model_list = ModelList(model_list_prepare, likelihood_list_prepare, train_iter * 3)
+        # model_list.train()
+
+        # Save the records
+        model_records["record_tasks"] = pool_bayesian_best_results[:pool_active, :]
+        # Save the model state_dict
+        # model_records["model_tasks"] = model_list.model.state_dict()
+        # # Save the likelihood state_dict
+        # model_records["likelihood_tasks"] = model_list.likelihood.state_dict()
 
         torch.save(model_records, "./{}/{}_{}_{}_{}.pth".format(direct_name,
                                                                 task_number,
@@ -1670,7 +1801,7 @@ if __name__ == "__main__":
     #     main_solver(trials=my_trials, method_name="fixed_context_gp")
     #     main_solver(trials=my_trials, method_name="pool_gp")
     #     main_solver(trials=my_trials, method_name="ind_gp")
-    main_solver(trials=my_trials, method_name="fixed_context_gp")
+    main_solver(trials=my_trials, method_name="zhou_gp")
     # main_solver(trials=my_trials, method_name="pool_gp")
     # main_solver(trials=my_trials, method_name="ind_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
