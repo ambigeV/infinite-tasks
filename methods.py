@@ -58,13 +58,13 @@ method_name_list = ["10_50_ind_gp_hetero",
 # problem_name = "super_nonlinear_rastrigin_20_high"
 # problem_name = "linear_ackley"
 # problem_name = "re21_1"
-problem_name = "re25_1"
+problem_name = "truss"
 # problem_name = "re21_2"
 dim_size = 3
 task_params = 3 # Default value should be 2
 # direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
 direct_name = "{}_result_{}".format(problem_name, dim_size)
-task_number = 20
+task_number = 40
 beta_ucb = 50
 # direct_name = "result_physics"
 
@@ -293,7 +293,7 @@ def solver(problem_params, method_params, trial):
 
     # What is the largest pool size?
     pool_budget_max = tot_budget // ind_size
-    pool_max = 80
+    pool_max = 200
     pool_active = ind_size
     pool_budget = 0
 
@@ -375,15 +375,15 @@ def solver(problem_params, method_params, trial):
         zhou_size = 40
         init_size = tot_init // zhou_size
         pool_active = init_size
-        task_list = torch.rand(init_size, n_dim)
+        task_list = torch.rand(init_size, n_task_params)
 
         # Initial zhou samples to find the according task parameter
         for i in range(pool_active):
             for j in range(zhou_size):
                 # Store solution
-                pool_bayesian_vector[pool_budget, :n_dim] = task_list[i, :]
+                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = task_list[i, :]
                 # Store task parameter
-                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = torch.rand(n_task_params).unsqueeze(0)
+                pool_bayesian_vector[pool_budget, :n_dim] = torch.rand(n_dim).unsqueeze(0)
                 # Store objective value
                 pool_bayesian_vector[pool_budget, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
                     problem.evaluate(pool_bayesian_vector[pool_budget, :(n_dim + n_task_params)])
@@ -877,7 +877,7 @@ def solver(problem_params, method_params, trial):
             temp_vectors = pool_bayesian_best_results[:pool_active, :]
 
             likelihood = gpytorch.likelihoods.GaussianLikelihood()
-            model = VanillaGP(temp_vectors[:, :n_dim],
+            model = VanillaGP(temp_vectors[:, n_dim:(n_dim + n_task_params)],
                               temp_vectors[:, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)].squeeze(1),
                               likelihood)
             # Insert it into a list
@@ -891,7 +891,7 @@ def solver(problem_params, method_params, trial):
             # Fetch new task
             ans = next_sample([model_list.model.models[0]],
                               [model_list.likelihood.likelihoods[0]],
-                              n_dim,
+                              n_task_params,
                               torch.tensor([1], dtype=torch.float32).to(device),
                               mode=4,
                               fixed_solution=None,
@@ -901,9 +901,9 @@ def solver(problem_params, method_params, trial):
             new_task = ans.clone().unsqueeze(0)
 
             for i in range(zhou_size):
-                pool_bayesian_vector[pool_budget, :n_dim] = new_task
-                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = \
-                    torch.rand(n_task_params).unsqueeze(0)
+                pool_bayesian_vector[pool_budget, n_dim:(n_dim + n_task_params)] = new_task
+                pool_bayesian_vector[pool_budget, :n_dim] = \
+                    torch.rand(n_dim).unsqueeze(0)
                 pool_bayesian_vector[pool_budget, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
                     problem.evaluate(pool_bayesian_vector[pool_budget, :(n_dim + n_task_params)])
 
@@ -1801,8 +1801,8 @@ if __name__ == "__main__":
     #     main_solver(trials=my_trials, method_name="fixed_context_gp")
     #     main_solver(trials=my_trials, method_name="pool_gp")
     #     main_solver(trials=my_trials, method_name="ind_gp")
-    main_solver(trials=my_trials, method_name="zhou_gp")
-    # main_solver(trials=my_trials, method_name="pool_gp")
+    # main_solver(trials=my_trials, method_name="zhou_gp")
+    main_solver(trials=my_trials, method_name="pool_gp")
     # main_solver(trials=my_trials, method_name="ind_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")

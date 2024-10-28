@@ -454,7 +454,7 @@ class Truss:
         # f3 = (80 * torch.sqrt(1 + torch.square(x[2]))) / (x[1] * x[2]) * 1e-5
         # f3 = torch.where(f3 < 1, f3, 1)
 
-        return -((f1 + f2).item() - 1 - 1e3)/1e3
+        return -((f1 + f2).item() - 1 - 1e3)/1e4
 
 
 class ReControl:
