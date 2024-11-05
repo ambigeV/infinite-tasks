@@ -26,8 +26,8 @@ from scipy.stats import qmc
 
 # method_name_list = ["10_50_ind_gp_ard",
 #                     "10_50_fixed_context_gp_ard"]
-method_name_list = ["10_50_ind_gp_hetero",
-                    "10_50_fixed_context_gp_hetero"]
+method_name_list = ["20_50_ind_gp",
+                    "20_50_fixed_context_gp"]
                     # "20_50_context_gp_plain",
                     # "20_50_active_uncertain_context_gp_plain",
                     # "20_50_active_gradient_context_gp_plain"]
@@ -55,16 +55,16 @@ method_name_list = ["10_50_ind_gp_hetero",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-# problem_name = "super_nonlinear_rastrigin_20_high"
+problem_name = "middle_nonlinear_griewank_high"
 # problem_name = "linear_ackley"
 # problem_name = "re21_1"
-problem_name = "truss"
+# problem_name = "truss"
 # problem_name = "re21_2"
-dim_size = 3
-task_params = 3 # Default value should be 2
-# direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
-direct_name = "{}_result_{}".format(problem_name, dim_size)
-task_number = 40
+dim_size = 4
+task_params = 5 # Default value should be 2
+direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+# direct_name = "{}_result_{}".format(problem_name, dim_size)
+task_number = 20
 beta_ucb = 50
 # direct_name = "result_physics"
 
@@ -1396,6 +1396,8 @@ def solver(problem_params, method_params, trial):
 
         # Save the records
         model_records["record_tasks"] = pool_bayesian_best_results[:pool_active, :]
+        # Save all the records
+        model_records["all_tasks"] = pool_bayesian_vector
         # Save the model state_dict
         model_records["model_tasks"] = model_list.model.state_dict()
         # Save the likelihood state_dict
@@ -1711,7 +1713,7 @@ def compare_convergence():
 
     # method_name = "context_gp"
     # problem_name = "sep_arm"
-    trial_number_tot = 10
+    trial_number_tot = 5
 
     result_lists = []
     convergence_lists = []
@@ -1802,7 +1804,7 @@ if __name__ == "__main__":
     #     main_solver(trials=my_trials, method_name="pool_gp")
     #     main_solver(trials=my_trials, method_name="ind_gp")
     # main_solver(trials=my_trials, method_name="zhou_gp")
-    main_solver(trials=my_trials, method_name="pool_gp")
+    # main_solver(trials=my_trials, method_name="pool_gp")
     # main_solver(trials=my_trials, method_name="ind_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
@@ -1836,5 +1838,5 @@ if __name__ == "__main__":
     # plt.legend()
     # plt.show()
     # compare_all(n_task_params=task_params)
-    # compare_convergence()
+    compare_convergence()
 
