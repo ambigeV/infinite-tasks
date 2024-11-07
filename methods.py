@@ -24,10 +24,9 @@ from scipy.stats import qmc
 # method_name_list = ["ind_gp", "fixed_context_gp",
 #                     "context_gp_plain", "forward_inverse_context_gp_plain"]
 
-# method_name_list = ["10_50_ind_gp_ard",
-#                     "10_50_fixed_context_gp_ard"]
-method_name_list = ["20_50_ind_gp",
-                    "20_50_fixed_context_gp"]
+# method_name_list = ["10_50_ind_gp_ard"]
+# method_name_list = ["20_50_ind_gp",
+#                     "20_50_fixed_context_gp"]
                     # "20_50_context_gp_plain",
                     # "20_50_active_uncertain_context_gp_plain",
                     # "20_50_active_gradient_context_gp_plain"]
@@ -55,14 +54,14 @@ method_name_list = ["20_50_ind_gp",
 
 # problem_name = "sep_arm"
 # problem_name = "linear_rastrigin_20"
-problem_name = "middle_nonlinear_griewank_high"
+# problem_name = "middle_nonlinear_griewank_high"
 # problem_name = "linear_ackley"
 # problem_name = "re21_1"
 # problem_name = "truss"
 # problem_name = "re21_2"
 dim_size = 4
 task_params = 5 # Default value should be 2
-direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+# direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
 # direct_name = "{}_result_{}".format(problem_name, dim_size)
 task_number = 20
 beta_ucb = 50
@@ -76,7 +75,8 @@ def configure_problem(problem_name):
     params["tot_budget"] = 2000
     # params["tot_budget"] = 300
     params["aqf"] = "ucb"
-    params["train_iter"] = 300
+    # params["train_iter"] = 300
+    params["train_iter"] = 500
     params["test_iter"] = 50
     params["switch_size"] = task_number * 2
     params["problem_name"] = problem_name
@@ -107,12 +107,18 @@ def configure_method(method_name):
     params["if_pool"] = False
     params["if_lbfgs"] = False
     params["if_zhou"] = False
+    params["if_soo"] = False
     params["method_name"] = method_name
 
     if method_name == "zhou_gp":
         params["if_zhou"] = True
 
     if method_name == "pool_gp":
+        params["if_pool"] = True
+        params["mode"] = 1
+        
+    if method_name == "pool_gp_soo":
+        params["if_soo"] = True
         params["if_pool"] = True
         params["mode"] = 1
     
@@ -270,6 +276,7 @@ def solver(problem_params, method_params, trial):
     method_mode = method_params["mode"]
     if_lbfgs = method_params["if_lbfgs"]
     if_zhou = method_params["if_zhou"]
+    if_soo = method_params["if_soo"]
 
     # Fetch problem parameters
     ind_size = problem_params["ind_size"]
@@ -982,7 +989,8 @@ def solver(problem_params, method_params, trial):
             ec_task_results = ec_active_myopic_moo(inverse_model_list,
                                                    ec_gen, ec_iter,
                                                    n_dim, n_task_params,
-                                                   1, method_mode, task_list)
+                                                   1, method_mode, task_list,
+                                                   if_soo)
             ec_size, _ = ec_task_results.shape
             new_task = ec_task_results[np.random.randint(ec_size), :].view(1, -1)
             task_list = torch.cat([task_list, new_task])
@@ -1794,15 +1802,15 @@ def fetch_task_lhs(task_param=2, task_size=10):
 my_trials = 5
 
 if __name__ == "__main__":
-    # problem_name_list = ["tang", "rosenbrock", "griewank"]
-    # problem_name_template = "nonlinear"
-    # for cur_name in problem_name_list:
-    #     problem_name = "{}_{}_high".format(problem_name_template, cur_name)
-    #     direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
-    #     print(direct_name)
-    #     main_solver(trials=my_trials, method_name="fixed_context_gp")
-    #     main_solver(trials=my_trials, method_name="pool_gp")
-    #     main_solver(trials=my_trials, method_name="ind_gp")
+    problem_name_list = ["ackley"]
+    problem_name_template = "nonlinear"
+    for cur_name in problem_name_list:
+        problem_name = "{}_{}_high".format(problem_name_template, cur_name)
+        direct_name = "soo_{}_result_{}_{}".format(problem_name, dim_size, task_params)
+        print(direct_name)
+        # main_solver(trials=my_trials, method_name="fixed_context_gp")
+        main_solver(trials=my_trials, method_name="pool_gp_soo")
+        # main_solver(trials=my_trials, method_name="ind_gp")
     # main_solver(trials=my_trials, method_name="zhou_gp")
     # main_solver(trials=my_trials, method_name="pool_gp")
     # main_solver(trials=my_trials, method_name="ind_gp")
@@ -1838,5 +1846,5 @@ if __name__ == "__main__":
     # plt.legend()
     # plt.show()
     # compare_all(n_task_params=task_params)
-    compare_convergence()
+    # compare_convergence()
 

@@ -141,7 +141,7 @@ class ModelGradient:
 
 
 class ModelGradientMyopic:
-    def __init__(self, inverse_model_list: ModelList, n_dim, n_task_params, n_tasks, mode, ref_tasks):
+    def __init__(self, inverse_model_list: ModelList, n_dim, n_task_params, n_tasks, mode, ref_tasks, if_soo):
         self.inverse_model_list = inverse_model_list
         self.n_dim = n_dim
         self.n_obj = 2
@@ -149,6 +149,7 @@ class ModelGradientMyopic:
         self.n_tasks = n_tasks
         self.mode = mode
         self.ref_tasks = ref_tasks
+        self.if_soo = if_soo
 
     def evaluate(self, solution: torch.tensor = None):
 
@@ -171,6 +172,8 @@ class ModelGradientMyopic:
         # grad_result: Tensor Shape: (n_sols * n_tasks, )
         grad_result = grad_result.view(n_sols, -1)
         grad_result = torch.mean(grad_result, dim=1)
+        if self.if_soo:
+            grad_result = grad_result * 0
         # grad_result: Tensor Shape: (n_sols, )
 
         ###################################################################################
@@ -240,7 +243,7 @@ def ec_active_moo(inverse_model_list: ModelList, ec_gen: int, ec_iter: int, n_di
 
 
 def ec_active_myopic_moo(inverse_model_list: ModelList, ec_gen: int, ec_iter: int, n_dim: int,
-                         n_task_params: int, n_tasks: int, mode: int, ref_tasks: torch.Tensor):
+                         n_task_params: int, n_tasks: int, mode: int, ref_tasks: torch.Tensor, if_soo: bool=False):
     sample_size = n_tasks
     assert n_tasks == 1
     problem_current = ModelGradientMyopic(inverse_model_list,
@@ -248,7 +251,8 @@ def ec_active_myopic_moo(inverse_model_list: ModelList, ec_gen: int, ec_iter: in
                                           n_task_params,
                                           n_tasks,
                                           mode,
-                                          ref_tasks)
+                                          ref_tasks,
+                                          if_soo)
     obj_problem = OPT(problem_current, n_var=problem_current.n_task_params * n_tasks, n_obj=problem_current.n_obj)
     algorithm = NSGA2(pop_size=ec_gen)
     res = minimize(obj_problem,
