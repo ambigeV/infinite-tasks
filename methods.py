@@ -53,15 +53,16 @@ from scipy.stats import qmc
 #                     "context_gp"]
 
 # problem_name = "sep_arm"
-# problem_name = "linear_rastrigin_20"
-# problem_name = "middle_nonlinear_griewank_high"
+# problem_name = "middle_nonlinear_rastrigin_20_high"
+problem_name = "linear_griewank_high"
 # problem_name = "linear_ackley"
+# problem_name = "recontrol_env"
 # problem_name = "re21_1"
 # problem_name = "truss"
 # problem_name = "re21_2"
 dim_size = 4
 task_params = 5 # Default value should be 2
-# direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
 # direct_name = "{}_result_{}".format(problem_name, dim_size)
 task_number = 20
 beta_ucb = 50
@@ -1802,17 +1803,17 @@ def fetch_task_lhs(task_param=2, task_size=10):
 my_trials = 5
 
 if __name__ == "__main__":
-    problem_name_list = ["ackley"]
-    problem_name_template = "nonlinear"
-    for cur_name in problem_name_list:
-        problem_name = "{}_{}_high".format(problem_name_template, cur_name)
-        direct_name = "soo_{}_result_{}_{}".format(problem_name, dim_size, task_params)
-        print(direct_name)
-        # main_solver(trials=my_trials, method_name="fixed_context_gp")
-        main_solver(trials=my_trials, method_name="pool_gp_soo")
+    # problem_name_list = ["ackley"]
+    # problem_name_template = "nonlinear"
+    # for cur_name in problem_name_list:
+    #     problem_name = "{}_{}_high".format(problem_name_template, cur_name)
+    #     direct_name = "soo_{}_result_{}_{}".format(problem_name, dim_size, task_params)
+    #     print(direct_name)
+    #     # main_solver(trials=my_trials, method_name="fixed_context_gp")
+    #     main_solver(trials=my_trials, method_name="pool_gp_soo")
         # main_solver(trials=my_trials, method_name="ind_gp")
     # main_solver(trials=my_trials, method_name="zhou_gp")
-    # main_solver(trials=my_trials, method_name="pool_gp")
+    main_solver(trials=my_trials, method_name="pool_gp_soo")
     # main_solver(trials=my_trials, method_name="ind_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
