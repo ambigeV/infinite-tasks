@@ -14,14 +14,16 @@ def cvt(x, k, sample_weight=None, verbose=False):
     return X, k_means
 
 
-def plot_box(tensors, methods):
-    plt.boxplot(tensors, labels=methods)
-    plt.title('Box Plot of Tensors for Each Method')
+def plot_box(tensors, methods, if_log=False):
+    if if_log:
+        plt.boxplot(tensors,  whis=[0, 100], labels=methods)
+    else:
+        plt.boxplot(tensors, labels=methods)
+    # plt.title('')
     plt.xlabel('Methods')
-    plt.ylabel('Values')
+    plt.ylabel('Objective Values')
     plt.grid(True)
     # plt.legend()
-    plt.show()
 
 
 def plot_tot(values_tot, figure_id, keys, if_mean=True):

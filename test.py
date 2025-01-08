@@ -28,8 +28,8 @@ if __name__ == "__main__":
     # plt.plot(results[:, 0], results[:, 1], 'bo', alpha=0.1)
     # plt.plot(centers[:, 0], centers[:, 1], 'rx', alpha=1)
     # plt.show()
-    ind_size = 20
-    dim_size = 5
+    ind_size = 40
+    dim_size = 3
     name = "task_list_{}_{}.pth".format(ind_size, dim_size)
     sampler = qmc.LatinHypercube(dim_size)
     samples = sampler.random(ind_size)
