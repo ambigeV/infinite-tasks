@@ -434,21 +434,23 @@ class Tang:
 class Truss:
     def __init__(self, n_dim=3):
         self.n_dim = n_dim
-        self.sol_low = torch.Tensor([1e-5, 1e-5, 1])
+        self.sol_low = torch.Tensor([2, 2, 1])
         self.sol_high = torch.Tensor([100, 100, 3])
         self.sol_delta_low = torch.ones(3) * -0.05
         self.sol_delta_high = torch.ones(3) * 0.05
 
     def evaluate(self, t):
         x = t.clone()
-
         # Model the noise
         x[:self.n_dim] = x[:self.n_dim] * (self.sol_delta_high - self.sol_delta_low) + self.sol_delta_low
         x[:self.n_dim] = x[:self.n_dim] + x[self.n_dim:]
         x[:self.n_dim] = torch.clamp(x[:self.n_dim], 0, 1)
+
         x[:self.n_dim] = x[:self.n_dim] * (self.sol_high - self.sol_low) + self.sol_low
         # Compute f1
-        f1 = x[0] * torch.sqrt(torch.square(x[0]) + 16) + x[1] * torch.sqrt(1 + torch.square(x[2])) * 10
+        x[2] = torch.sqrt(torch.square(x[1]) - 1)
+        f1 = (x[0] * torch.sqrt(torch.square(x[2]) + 16) + x[1] * torch.sqrt(1 + torch.square(x[2]))) * 10
+        # f1 = x[0] * x[0] + x[1] * x[1]
         # f1 = torch.where(f1 < 1, f1, 1)
         # Compute f2
         f2 = (20 * torch.sqrt(16 + torch.square(x[2]))) / (x[0] * x[2]) * 1e-5
@@ -458,6 +460,7 @@ class Truss:
         # f3 = torch.where(f3 < 1, f3, 1)
 
         return -((f1 + f2).item() - 1 - 1e3)/1e4
+        # return (f1 + f2).item
 
 
 class ReControl:
