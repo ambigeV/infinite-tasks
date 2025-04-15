@@ -6,6 +6,9 @@ import torch
 import numpy as np
 from models import VanillaGP, ModelList, next_sample, device, \
     model_lcb, evaluation, compute_gradient_list, ArdGP
+from multitask_models import MultitaskGP, build_and_train_mtgp, \
+    generate_de_trials, select_de, build_local_gp_and_optimize, \
+    derive_transfer_matrix
 from problems import get_problem
 from utils import plot_hist, cvt, plot_tot, plot_box, \
     plot_details, plot_convergence, plot_iteration_convergence, \
@@ -22,7 +25,7 @@ from scipy.stats import qmc
 #                     "forward_inverse_context_gp_plain"]
 
 method_name_list = ["ind_gp", "fixed_context_gp",
-                    "context_gp_plain", "forward_inverse_context_gp_plain"]
+                    "context_gp_plain", "forward_inverse_context_gp_plain", "SELF"]
 
 # method_name_list = ["10_50_ind_gp_ard"]
 # method_name_list = ["20_50_ind_gp",
@@ -56,16 +59,18 @@ method_name_list = ["ind_gp", "fixed_context_gp",
 # problem_name = "middle_nonlinear_rastrigin_20_high"
 # problem_name = "linear_griewank_high"
 # problem_name = "linear_ackley"
+# problem_name = "recontrol"
 # problem_name = "recontrol_env"
 # problem_name = "re21_1"
 problem_name = "truss"
 # problem_name = "re21_2"
-dim_size = 3
-task_params = 3 # Default value should be 2
+dim_size = 4
+task_params = 5 # Default value should be 2
 # direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
 direct_name = "{}_result_{}".format(problem_name, dim_size)
 task_number = 20
-beta_ucb = 50
+beta_ucb = 1
+if_norm = False
 # direct_name = "result_physics"
 
 
@@ -76,8 +81,8 @@ def configure_problem(problem_name):
     params["tot_budget"] = 2000
     # params["tot_budget"] = 300
     params["aqf"] = "ucb"
-    # params["train_iter"] = 300
-    params["train_iter"] = 500
+    params["train_iter"] = 300
+    # params["train_iter"] = 500
     params["test_iter"] = 50
     params["switch_size"] = task_number * 2
     params["problem_name"] = problem_name
@@ -109,6 +114,7 @@ def configure_method(method_name):
     params["if_lbfgs"] = False
     params["if_zhou"] = False
     params["if_soo"] = False
+    params["if_mtgp"] = False
     params["method_name"] = method_name
 
     if method_name == "zhou_gp":
@@ -130,6 +136,9 @@ def configure_method(method_name):
 
     if method_name == "ind_gp":
         params["if_ind"] = True
+
+    if method_name == "SELF":
+        params["if_mtgp"] = True
 
     if method_name == "ind_gp_20":
         params["if_ind"] = True
@@ -278,6 +287,7 @@ def solver(problem_params, method_params, trial):
     if_lbfgs = method_params["if_lbfgs"]
     if_zhou = method_params["if_zhou"]
     if_soo = method_params["if_soo"]
+    if_mtgp = method_params["if_mtgp"]
 
     # Fetch problem parameters
     ind_size = problem_params["ind_size"]
@@ -313,8 +323,9 @@ def solver(problem_params, method_params, trial):
 
     # Prepare solution placeholder
     bayesian_vector = torch.zeros(tot_budget, n_dim + n_task_params + n_obj)
+    bayesian_budget_meter = torch.zeros(ind_size)
     bayesian_best_results = torch.Tensor([])
-    if if_ind or if_fixed:
+    if if_ind or if_fixed or if_mtgp:
         if if_ind:
             task_list = fetch_task_lhs(n_task_params, ind_size)
             # task_list = [torch.rand(n_task_params)
@@ -331,6 +342,8 @@ def solver(problem_params, method_params, trial):
             task_list = torch.stack(fetch_task_lhs(n_task_params, switch_size))
             switch_list = task_list
             switch_count_vec = torch.zeros(switch_size)
+        if if_mtgp:
+            task_list = fetch_task_lhs(n_task_params, ind_size)
 
         budget_per_task = tot_budget // ind_size
 
@@ -349,8 +362,14 @@ def solver(problem_params, method_params, trial):
             bayesian_best_results = torch.ones(ind_size, n_dim + n_task_params + n_obj) * 1e6
         bayesian_cut_results = torch.Tensor([])
 
+    init_samples = None
+    if if_mtgp:
+        sampler = qmc.LatinHypercube(n_dim)
+        sample_size = tot_init // ind_size
+        init_samples = sampler.random(sample_size)
+
     # Prepare initialization
-    if if_ind or if_fixed:
+    if if_ind or if_fixed or if_mtgp:
         if if_switch:
             for i in range(switch_size):
                 sample_size = tot_init // switch_size
@@ -369,7 +388,10 @@ def solver(problem_params, method_params, trial):
         else:
             for i in range(ind_size):
                 sample_size = tot_init // ind_size
-                bayesian_vector_list[i][:sample_size, :n_dim] = torch.rand(sample_size, n_dim)
+                if not if_mtgp:
+                    bayesian_vector_list[i][:sample_size, :n_dim] = torch.rand(sample_size, n_dim)
+                else:
+                    bayesian_vector_list[i][:sample_size, :n_dim] = torch.from_numpy(init_samples).float()
                 bayesian_vector_list[i][:sample_size, n_dim:(n_dim + n_task_params)] = task_list[i]
                 for j in range(sample_size):
                     bayesian_vector_list[i][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
@@ -379,6 +401,8 @@ def solver(problem_params, method_params, trial):
                         bayesian_best_results[i, :] = bayesian_vector_list[i][j, :]
                         print("Task {} in Iteration {}: Best Obj {}".format(i + 1, j + 1,
                                                                             bayesian_vector_list[i][j, -1]))
+                if if_mtgp:
+                    bayesian_budget_meter[i] = sample_size
     elif if_zhou:
         zhou_size = 40
         init_size = tot_init // zhou_size
@@ -445,13 +469,144 @@ def solver(problem_params, method_params, trial):
                 problem.evaluate(bayesian_vector[i, :(n_dim + n_task_params)])
 
     # Prepare iterations
-    if if_ind or if_fixed:
+    if if_ind or if_fixed or if_mtgp:
         model_list = None
         sample_size = tot_init // ind_size
         tot_size = tot_budget // ind_size
         cut_size = int(tot_size * 0.80)
 
-        if not if_cut:
+        if if_mtgp:
+            fes = tot_init
+            while fes < tot_budget:
+                print("Trial {}: Iteration {}, FEs: {}".format(trial + 1, fes, fes))
+                # Step 1: Training MTGP
+                # Step 1.a: Collect all the training data (decision variable), all the objective values according to
+                # the current bayesian_budget_meter?
+                # Prepare data for MTGP
+                X_all_list = []
+                y_all_list = []
+                task_indices_list = []
+
+                for m in range(ind_size):
+                    # Get data for each task based on the current budget meter
+                    current_count = int(bayesian_budget_meter[m].item())
+                    X_m = bayesian_vector_list[m][:current_count, :n_dim]
+                    y_m = bayesian_vector_list[m][:current_count, (n_dim + n_task_params):
+                                                                  (n_dim + n_task_params + n_obj)].squeeze(1)
+                    task_indices_m = torch.ones(len(y_m), dtype=torch.long) * m
+
+                    X_all_list.append(X_m)
+                    y_all_list.append(y_m)
+                    task_indices_list.append(task_indices_m)
+
+                X_all = torch.cat(X_all_list, dim=0)
+                y_all = torch.cat(y_all_list, dim=0)
+                task_indices = torch.cat(task_indices_list, dim=0)
+                # Step 1.b: Training MTGP with the data
+                mtgp_model, mtgp_likelihood, mtgp_correlation_mat = build_and_train_mtgp(
+                    X_all.clone(), y_all.clone(), task_indices.clone(), ind_size, train_iter=train_iter
+                )
+
+                # Step 2: Select solution via MTGP-LCB based on DE-generated solutions
+                # Step 2.a: Generate Solutions via DE
+                for m in range(ind_size):
+                    # Get current evaluation count for this task
+                    current_count = int(bayesian_budget_meter[m].item())
+                    next_index = current_count
+
+                    # Ensure we have enough space in the tensor
+                    if next_index >= bayesian_vector_list[m].shape[0]:
+                        # Expand the tensor if needed
+                        # Do not Expand but enter next loop
+                        continue
+
+                    # Generate trial vectors using DE/rand/1/bin
+                    trials = generate_de_trials(bayesian_vector_list[m][:current_count, :].clone(),
+                                                task_list[m].clone(),
+                                                n_dim,
+                                                n_task_params)
+                # Step 2.b: Select and Return one solution
+                    ans = select_de(mtgp_model, mtgp_likelihood, n_dim, trials, m)
+                # Step 2.c: Evaluate the selected solution
+                    j = current_count
+                    bayesian_vector_list[m][j, :(n_dim + n_task_params)] = ans.unsqueeze(0).clone()
+                    bayesian_vector_list[m][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                        problem.evaluate(bayesian_vector_list[m][j, :(n_dim + n_task_params)])
+
+                    if bayesian_vector_list[m][j, -1] < bayesian_best_results[m, -1]:
+                        bayesian_best_results[m, :] = bayesian_vector_list[m][j, :]
+                        print("Task {} in Iteration {}: Best Obj {}".format(m + 1, j + 1,
+                                                                            bayesian_vector_list[m][j, -1]))
+                    fes += 1
+                    bayesian_budget_meter[m] += 1
+
+                # Step 3: Local GP Modeling
+                bayesian_improvement_vector = torch.zeros(ind_size, n_dim)
+                # Step 3.a: Select Neighboring Solutions to the best solutions and build a GP model
+                for m in range(ind_size):
+                    # Skip if we're at budget limit
+                    if fes >= tot_budget:
+                        break
+
+                    # Get current evaluation count for this task
+                    current_count = int(bayesian_budget_meter[m].item())
+                    next_index = current_count
+
+                    # Ensure we have enough space in the tensor
+                    if next_index >= bayesian_vector_list[m].shape[0]:
+                        # Expand the tensor if needed
+                        # Do not Expand but enter next loop
+                        continue
+
+                    # Step 3.b: Using a DE algorithm to optimize EI acquisition function
+                    ans = build_local_gp_and_optimize(bayesian_vector_list[m][:next_index, :].clone(),
+                                                      bayesian_best_results[m, :].clone(),
+                                                      n_dim)
+
+                    j = current_count
+                    bayesian_vector_list[m][j, :(n_dim + n_task_params)] = ans[:-1].unsqueeze(0).clone()
+                    bayesian_improvement_vector[m, :] = bayesian_vector_list[m][j, :n_dim]
+                    bayesian_vector_list[m][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                        problem.evaluate(bayesian_vector_list[m][j, :(n_dim + n_task_params)])
+
+                    if bayesian_vector_list[m][j, -1] < bayesian_best_results[m, -1]:
+                        bayesian_best_results[m, :] = bayesian_vector_list[m][j, :]
+                        print("Task {} in Iteration {}: Best Obj {}".format(m + 1, j + 1,
+                                                                            bayesian_vector_list[m][j, -1]))
+                    fes += 1
+                    bayesian_budget_meter[m] += 1
+
+                # Step 4: Extract correlation matrix from MTGP and aggregate solutions as per the correlation
+                mtgp_transfer_mat = derive_transfer_matrix(mtgp_correlation_mat)
+                random_mat = torch.rand(ind_size, ind_size)
+                mtgp_pair_mat = mtgp_transfer_mat - random_mat > 0
+                mtgp_pairs = torch.nonzero(mtgp_pair_mat)
+                for pair in mtgp_pairs:
+                    m, m_donor = pair[0].item(), pair[1].item()
+
+                    # Get current evaluation count for this task
+                    current_count = int(bayesian_budget_meter[m].item())
+                    next_index = current_count
+                    # Ensure we have enough space in the tensor
+                    if next_index >= bayesian_vector_list[m].shape[0]:
+                        # Expand the tensor if needed
+                        # Do not Expand but enter next loop
+                        continue
+
+                    ans = bayesian_improvement_vector[m_donor, :]
+                    j = current_count
+                    bayesian_vector_list[m][j, :n_dim] = ans.unsqueeze(0).clone()
+                    bayesian_vector_list[m][j, n_dim:(n_dim + n_task_params)] = task_list[m]
+                    bayesian_vector_list[m][j, (n_dim + n_task_params):(n_dim + n_task_params + n_obj)] = \
+                        problem.evaluate(bayesian_vector_list[m][j, :(n_dim + n_task_params)])
+
+                    if bayesian_vector_list[m][j, -1] < bayesian_best_results[m, -1]:
+                        bayesian_best_results[m, :] = bayesian_vector_list[m][j, :]
+                        print("Task {} in Iteration {}: Best Obj {}".format(m + 1, j + 1,
+                                                                            bayesian_vector_list[m][j, -1]))
+                    fes += 1
+                    bayesian_budget_meter[m] += 1
+        elif not if_cut:
             for j in range(sample_size, tot_size):
                 inverse_model_list = None
                 temp_vectors = None
@@ -972,7 +1127,7 @@ def solver(problem_params, method_params, trial):
 
                 inverse_likelihood_list_prepare.append(inverse_likelihood)
                 inverse_model_list_prepare.append(inverse_model)
-            
+
             if if_lbfgs:
                 inverse_model_list = ModelList(inverse_model_list_prepare,
                                                inverse_likelihood_list_prepare,
@@ -983,7 +1138,7 @@ def solver(problem_params, method_params, trial):
                                                inverse_likelihood_list_prepare,
                                                train_iter * 3)
                 inverse_model_list.train()
-            ####################################################################################
+            ###################################################################################
             # Fetch new task
             ec_gen = 100
             ec_iter = 50
@@ -994,6 +1149,7 @@ def solver(problem_params, method_params, trial):
                                                    if_soo)
             ec_size, _ = ec_task_results.shape
             new_task = ec_task_results[np.random.randint(ec_size), :].view(1, -1)
+            # new_task = torch.rand(1, n_task_params)
             task_list = torch.cat([task_list, new_task])
             # Increase the pool active
             pool_active += 1
@@ -1257,7 +1413,7 @@ def solver(problem_params, method_params, trial):
                         problem.evaluate(bayesian_vector[cur_tot + i, :(n_dim + n_task_params)])
 
     # Build inverse model
-    if if_ind or if_fixed:
+    if if_ind or if_fixed or if_mtgp:
         model_records = dict()
         model_records["ind"] = True
         model_records["dim"] = n_dim
@@ -1412,11 +1568,11 @@ def solver(problem_params, method_params, trial):
         # Save the likelihood state_dict
         model_records["likelihood_tasks"] = model_list.likelihood.state_dict()
 
-        torch.save(model_records, "./{}/{}_{}_{}_{}.pth".format(direct_name,
+        torch.save(model_records, "./{}/{}_{}_{}_random_{}.pth".format(direct_name,
                                                                 task_number,
                                                                 beta_ucb,
                                                                 method_name,
-                                                                trial+1))
+                                                                trial))
     else:
         model_records = dict()
         model_records["ind"] = False
@@ -1817,21 +1973,25 @@ def fetch_task_lhs(task_param=2, task_size=10):
 #                     "forward_inverse_context_gp_inner_plain",
 #                     "forward_inverse_context_gp_plain"]
 
-my_trials = 4
+my_trials = 5
 
 if __name__ == "__main__":
-    # problem_name_list = ["griewank"]
-    # problem_name_template = "nonlinear"
-    # for cur_name in problem_name_list:
-    #     problem_name = "{}_{}_high".format(problem_name_template, cur_name)
-    #     direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
-    #     print(direct_name)
-    #     # main_solver(trials=my_trials, method_name="fixed_context_gp")
-    #     main_solver(trials=my_trials, method_name="pool_gp_soo")
-    #     # main_solver(trials=my_trials, method_name="ind_gp")
+    problem_name_list = ["sphere", "ackley", "rastrigin_20", "griewank"]
+    # problem_name_list = ["sphere", "ackley"]
+    # problem_name_list = ["rastrigin_20", "griewank"]
+    problem_name_template = "nonlinear"
+    for cur_name in problem_name_list:
+        problem_name = "{}_{}_high".format(problem_name_template, cur_name)
+        direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+        print(direct_name)
+        # main_solver(trials=my_trials, method_name="fixed_context_gp")
+        # main_solver(trials=my_trials, method_name="pool_gp_soo")
+        # main_solver(trials=my_trials, method_name="ind_gp")
+        main_solver(trials=my_trials, method_name="SELF")
     # main_solver(trials=my_trials, method_name="zhou_gp")
-    main_solver(trials=my_trials, method_name="pool_gp_soo")
+    # main_solver(trials=my_trials, method_name="pool_gp_soo")
     # main_solver(trials=my_trials, method_name="ind_gp")
+    # main_solver(trials=my_trials, method_name="fixed_context_gp")
     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
     # main_solver(trials=my_trials, method_name="active_ec_hessian_context_gp_plain")

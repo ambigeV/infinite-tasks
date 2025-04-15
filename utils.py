@@ -135,8 +135,9 @@ def ax_plot_iteration_convergence(ax, results, method_list, task_id):
         ax.fill_between(x, means[i] - stds[i], means[i] + stds[i], alpha=0.2)
 
     # Setting labels and title
-    # ax.set_xlabel('Iterations')
-    # ax.set_ylabel('Value')
+    ax.set_xlabel('Iterations')
+    if task_id == 0:
+        ax.set_ylabel('Objective Values (Log Scale)')
     ax.set_title('Task {}'.format(task_id + 1))
     # if task_id == 5:
     #     ax.legend()
