@@ -1,5 +1,6 @@
 import random
 import time
+import argparse
 
 import gpytorch
 import torch
@@ -81,8 +82,8 @@ def configure_problem(problem_name):
     params["tot_budget"] = 2000
     # params["tot_budget"] = 300
     params["aqf"] = "ucb"
-    params["train_iter"] = 300
-    # params["train_iter"] = 500
+    # params["train_iter"] = 300
+    params["train_iter"] = 500
     params["test_iter"] = 50
     params["switch_size"] = task_number * 2
     params["problem_name"] = problem_name
@@ -261,7 +262,7 @@ def configure_method(method_name):
     return params
 
 
-def solver(problem_params, method_params, trial):
+def solver(problem_params, method_params, trial, ec_config=None):
     # Offer parameters of method and problem
     # Return the results for one trial
 
@@ -288,6 +289,14 @@ def solver(problem_params, method_params, trial):
     if_zhou = method_params["if_zhou"]
     if_soo = method_params["if_soo"]
     if_mtgp = method_params["if_mtgp"]
+
+    # Set EC configuration - if provided, otherwise use defaults
+    ec_gen = 100  # Default population size
+    ec_iter = 50  # Default EC iteration size
+
+    if ec_config and if_pool:
+        ec_gen = ec_config["ec_gen"]
+        ec_iter = ec_config["ec_iter"]
 
     # Fetch problem parameters
     ind_size = problem_params["ind_size"]
@@ -1140,8 +1149,6 @@ def solver(problem_params, method_params, trial):
                 inverse_model_list.train()
             ###################################################################################
             # Fetch new task
-            ec_gen = 100
-            ec_iter = 50
             ec_task_results = ec_active_myopic_moo(inverse_model_list,
                                                    ec_gen, ec_iter,
                                                    n_dim, n_task_params,
@@ -1568,11 +1575,13 @@ def solver(problem_params, method_params, trial):
         # Save the likelihood state_dict
         model_records["likelihood_tasks"] = model_list.likelihood.state_dict()
 
-        torch.save(model_records, "./{}/{}_{}_{}_random_{}.pth".format(direct_name,
-                                                                task_number,
-                                                                beta_ucb,
-                                                                method_name,
-                                                                trial))
+        torch.save(model_records, "./{}/{}_{}_{}_{}_{}_{}.pth".format(direct_name,
+                                                                      task_number,
+                                                                      beta_ucb,
+                                                                      method_name,
+                                                                      ec_gen,
+                                                                      ec_iter,
+                                                                      trial))
     else:
         model_records = dict()
         model_records["ind"] = False
@@ -1653,11 +1662,11 @@ def solver(problem_params, method_params, trial):
     return None
 
 
-def main_solver(trials, method_name="unified_gp"):
+def main_solver(trials, method_name="unified_gp", ec_config=None):
     problem_params = configure_problem(problem_name)
     method_params = configure_method(method_name)
     for trial in range(trials):
-        solver(problem_params, method_params, trial)
+        solver(problem_params, method_params, trial, ec_config)
 
 
 def main_retrival(direct_name="sep_arm", method_name="ind_gp", problem_name="sep_arm", trial_number=0):
@@ -1974,55 +1983,91 @@ def fetch_task_lhs(task_param=2, task_size=10):
 #                     "forward_inverse_context_gp_plain"]
 
 my_trials = 5
+#
+# if __name__ == "__main__":
+#     problem_name_list = ["sphere", "ackley", "rastrigin_20", "griewank"]
+#     # problem_name_list = ["sphere", "ackley"]
+#     # problem_name_list = ["rastrigin_20", "griewank"]
+#     problem_name_template = "nonlinear"
+#     for cur_name in problem_name_list:
+#         problem_name = "{}_{}_high".format(problem_name_template, cur_name)
+#         direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
+#         print(direct_name)
+#         # main_solver(trials=my_trials, method_name="fixed_context_gp")
+#         main_solver(trials=my_trials, method_name="pool_gp_soo")
+#         # main_solver(trials=my_trials, method_name="ind_gp")
+#         # main_solver(trials=my_trials, method_name="SELF")
+#     # main_solver(trials=my_trials, method_name="zhou_gp")
+#     # main_solver(trials=my_trials, method_name="pool_gp_soo")
+#     # main_solver(trials=my_trials, method_name="ind_gp")
+#     # main_solver(trials=my_trials, method_name="fixed_context_gp")
+#     # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
+#     # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
+#     # main_solver(trials=my_trials, method_name="active_ec_hessian_context_gp_plain")
+#     # main_solver(trials=10, method_name="fixed_context_inverse_cut_gp")
+#     # main_solver(trials=10, method_name="forward_inverse_fixed_context_gp_plain")
+#     # trial_num = 1
+#     # # tasks_1 = fetch_task_list(trial_num, method_name="unified_gp")
+#     # tasks_2 = fetch_task_list(trial_num, method_name="unified_gp_plain")
+#     # # tasks_3 = fetch_task_list(trial_num, method_name="context_gp")
+#     # tasks_4 = fetch_task_list(trial_num, method_name="context_gp_plain")
+#     # tasks_5 = fetch_task_list(trial_num, method_name="ind_gp")
+#     # tasks_5 = torch.stack(tasks_5)
+#     # tasks_6 = fetch_task_list(trial_num, method_name="fixed_context_gp")
+#     # tasks_6 = torch.stack(tasks_6)
+#     # tasks_7 = fetch_task_list(trial_num, method_name="forward_inverse_context_gp_plain")
+#     # sample_width = 100
+#     # tasks = uniform_sample(sample_width)
+#     # print(tasks.shape)
+#     # plt.scatter(tasks[:, 0], tasks[:, 1], alpha=0.5)
+#     # plt.title("Sampled tasks for testing data")
+#     # plt.show()
+#     #
+#     # # plt.scatter(tasks_1[:, 0], tasks_1[:, 1], alpha=0.2, label="unified_gp")
+#     # plt.scatter(tasks_2[:, 0], tasks_2[:, 1], alpha=0.2, label="unified_gp_plain")
+#     # # plt.scatter(tasks_3[:, 0], tasks_3[:, 1], alpha=0.2, label="context_gp")
+#     # plt.scatter(tasks_4[:, 0], tasks_4[:, 1], alpha=0.2, label="Random")
+#     # plt.scatter(tasks_5[:, 0], tasks_5[:, 1], alpha=0.2, label="Strategy 1")
+#     # plt.scatter(tasks_6[:, 0], tasks_6[:, 1], alpha=0.2, label="Strategy 2")
+#     # plt.scatter(tasks_7[:, 0], tasks_7[:, 1], alpha=0.2, label="Forward-Inverse")
+#     # plt.legend()
+#     # plt.show()
+#     # compare_all(n_task_params=task_params)
+#     # compare_convergence()
 
 if __name__ == "__main__":
-    problem_name_list = ["sphere", "ackley", "rastrigin_20", "griewank"]
-    # problem_name_list = ["sphere", "ackley"]
-    # problem_name_list = ["rastrigin_20", "griewank"]
-    problem_name_template = "nonlinear"
-    for cur_name in problem_name_list:
-        problem_name = "{}_{}_high".format(problem_name_template, cur_name)
-        direct_name = "{}_result_{}_{}".format(problem_name, dim_size, task_params)
-        print(direct_name)
-        # main_solver(trials=my_trials, method_name="fixed_context_gp")
-        # main_solver(trials=my_trials, method_name="pool_gp_soo")
-        # main_solver(trials=my_trials, method_name="ind_gp")
-        main_solver(trials=my_trials, method_name="SELF")
-    # main_solver(trials=my_trials, method_name="zhou_gp")
-    # main_solver(trials=my_trials, method_name="pool_gp_soo")
-    # main_solver(trials=my_trials, method_name="ind_gp")
-    # main_solver(trials=my_trials, method_name="fixed_context_gp")
-    # # main_solver(trials=10, method_name="context_inverse_active_gp_plain")
-    # main_solver(trials=my_trials, method_name="active_ec_gradient_context_gp_plain")
-    # main_solver(trials=my_trials, method_name="active_ec_hessian_context_gp_plain")
-    # main_solver(trials=10, method_name="fixed_context_inverse_cut_gp")
-    # main_solver(trials=10, method_name="forward_inverse_fixed_context_gp_plain")
-    # trial_num = 1
-    # # tasks_1 = fetch_task_list(trial_num, method_name="unified_gp")
-    # tasks_2 = fetch_task_list(trial_num, method_name="unified_gp_plain")
-    # # tasks_3 = fetch_task_list(trial_num, method_name="context_gp")
-    # tasks_4 = fetch_task_list(trial_num, method_name="context_gp_plain")
-    # tasks_5 = fetch_task_list(trial_num, method_name="ind_gp")
-    # tasks_5 = torch.stack(tasks_5)
-    # tasks_6 = fetch_task_list(trial_num, method_name="fixed_context_gp")
-    # tasks_6 = torch.stack(tasks_6)
-    # tasks_7 = fetch_task_list(trial_num, method_name="forward_inverse_context_gp_plain")
-    # sample_width = 100
-    # tasks = uniform_sample(sample_width)
-    # print(tasks.shape)
-    # plt.scatter(tasks[:, 0], tasks[:, 1], alpha=0.5)
-    # plt.title("Sampled tasks for testing data")
-    # plt.show()
-    #
-    # # plt.scatter(tasks_1[:, 0], tasks_1[:, 1], alpha=0.2, label="unified_gp")
-    # plt.scatter(tasks_2[:, 0], tasks_2[:, 1], alpha=0.2, label="unified_gp_plain")
-    # # plt.scatter(tasks_3[:, 0], tasks_3[:, 1], alpha=0.2, label="context_gp")
-    # plt.scatter(tasks_4[:, 0], tasks_4[:, 1], alpha=0.2, label="Random")
-    # plt.scatter(tasks_5[:, 0], tasks_5[:, 1], alpha=0.2, label="Strategy 1")
-    # plt.scatter(tasks_6[:, 0], tasks_6[:, 1], alpha=0.2, label="Strategy 2")
-    # plt.scatter(tasks_7[:, 0], tasks_7[:, 1], alpha=0.2, label="Forward-Inverse")
-    # plt.legend()
-    # plt.show()
-    # compare_all(n_task_params=task_params)
-    # compare_convergence()
+    # Parse command-line arguments for EC parameters
+    parser = argparse.ArgumentParser(description='Optimization with EC parameters')
+    parser.add_argument('--ec_gen', type=int, default=100, help='EC population size')
+    parser.add_argument('--ec_iter', type=int, default=50, help='EC iteration count')
+    parser.add_argument('--method', type=str, default='pool_gp_soo', help='Method name')
+    parser.add_argument('--template', type=str, default='nonlinear',
+                        choices=['nonlinear', 'middle_nonlinear'], help='Problem name template')
 
+    args = parser.parse_args()
+
+    # Create EC configuration
+    ec_config = {
+        "ec_gen": args.ec_gen,
+        "ec_iter": args.ec_iter
+    }
+
+    # Your existing global variables
+    my_trials = 5  # Set this to your default value
+
+    # Define problem types - unchanged
+    problem_name_list = ["sphere", "ackley", "rastrigin_20", "griewank"]
+    problem_name_template = args.template
+
+    # Original main loop - mostly unchanged
+    for cur_name in problem_name_list:
+        global problem_name, direct_name
+        problem_name = "{}_{}_high".format(problem_name_template, cur_name)
+        direct_name = "{}_result_{}_{}_{}".format(problem_name, dim_size, task_params, args.method)
+
+        print(f"Running {problem_name} with method {args.method}")
+        if "pool_gp" in args.method:
+            print(f"Using EC parameters: gen={args.ec_gen}, iter={args.ec_iter}")
+
+        # Run solver with provided method and EC configuration
+        main_solver(trials=my_trials, method_name=args.method, ec_config=ec_config)
